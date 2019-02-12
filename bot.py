@@ -542,8 +542,6 @@ class Bot(object):
         resp = self.br.open(self.PAGES['main']).read()
         soup = BeautifulSoup(resp)
 
-
-
         alert = soup.find(id='attack_alert')
         if not alert:
             self.logger.exception('Check attack failed')
@@ -805,10 +803,6 @@ class Bot(object):
         mini_sleep_time = randint(400, 2500) / 1000
         time.sleep(mini_sleep_time)
 
-    def stop(self):
-        self.logger.info('Stopping bot')
-        os.unlink(self.pidfile)
-
     def send_attack_of_probe(self,target):
         attack= True
         for planet in self.planets:
@@ -848,9 +842,6 @@ class Bot(object):
 
     def start(self):
         self.logger.info('Starting bot')
-        self.pid = str(os.getpid())
-        self.pidfile = 'bot.pid'
-        file(self.pidfile, 'w').write(self.pid)
 
         while not self.CMD_STOP:
                 try:
@@ -877,7 +868,6 @@ class Bot(object):
                 self.sleep()
 
         self.send_telegram_message("Bot Spento")
-        self.stop()
 
     def getPlayerId( self, name):
         # Scarico file Players
