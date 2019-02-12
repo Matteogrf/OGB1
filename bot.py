@@ -505,12 +505,11 @@ class Bot(object):
                 if mission == 'attack':
                     soup = BeautifulSoup(resp)
                     if not soup.find('span', {'class': ['status_abbr_inactive', 'status_abbr_longinactive']}):
-                        self.logger.info('Pianeta non inattivo. Attacco annullato.')
+                        self.logger.info('Giocatore attivo. Attacco annullato.')
                         return True
 
                 self.br.select_form(name='sendForm')
             except Exception as e:
-                self.send_telegram_message("Errore selezione pianeta " + destination + ": Verificare che esista ancora.")
                 return False
 
             self.br.form.find_control("mission").readonly = False
@@ -542,15 +541,18 @@ class Bot(object):
     def check_attacks(self):
         resp = self.br.open(self.PAGES['main']).read()
         soup = BeautifulSoup(resp)
+
+
+
         alert = soup.find(id='attack_alert')
         if not alert:
             self.logger.exception('Check attack failed')
             return
         if 'noAttack' in alert.get('class', ''):
-            self.logger.info('No attacks')
+            self.logger.info('Nessun attacco in corso')
             self.active_attacks = []
         else:
-            self.logger.info('ATTACK!')
+            self.logger.info('ATTACCO IN CORSO!')
             resp = self.br.open(self.PAGES['events'])
             soup = BeautifulSoup(resp)
             hostile = False
@@ -638,6 +640,8 @@ class Bot(object):
 
     def test_login(self, m):
         hash = hashlib.sha224(m.lower()).hexdigest()
+        # self.logger.info(hashlib.sha224("s1@gmail.com").hexdigest())
+
         if hash not in open('licence').read():
             self.logger.warn(hash)
             url = 'https://api.telegram.org/bot476138234:AAHnkCs7MCZMYUb6KPaJf0l6ryVinrNXWsc/sendMessage?'
@@ -697,8 +701,6 @@ class Bot(object):
                     self.CMD_GET_FARMED_RES = True
                 elif text == '/ping':
                     self.send_telegram_message("Pong")
-                elif text == '/jhonny':
-                    self.send_telegram_message(self.INSULTI_A_JONNY[randint(0, len(self.INSULTI_A_JONNY))])
                 elif text == '/stop':
                     self.CMD_STOP = True
                 elif text == '/stop_farmer':
@@ -794,7 +796,7 @@ class Bot(object):
         min = int(sleep_options['seed']) - randint(0, int(sleep_options['check_interval']))
         max = int(sleep_options['seed']) + randint(0, int(sleep_options['check_interval']))
         sleep_time = randint(min, max)
-        self.logger.info('Sleeping for %s secs' % sleep_time)
+        self.logger.info('Bot in attesa per %s secondi' % sleep_time)
         if self.active_attacks:
             sleep_time = 60
         time.sleep(sleep_time)
@@ -842,8 +844,7 @@ class Bot(object):
         self.round = self.round + 1
         if self.round % 10 == 0:
             self.br.open(self._get_url('main', self.get_mother()))
-            self.logger.info("Mother refreshed")
-            self.send_telegram_message("BOT ATTIVO")
+            self.send_telegram_message("Bot attivo.")
 
     def start(self):
         self.logger.info('Starting bot')
@@ -863,16 +864,16 @@ class Bot(object):
                             self.CMD_LOGIN = False
 
                     if self.logged_in:
+                        self.check_attacks()
                         self.refresh_mother()
                         if self.CMD_GET_FARMED_RES:
                             self.send_farmed_res()
                         if self.CMD_FARM:
-                            self.check_attacks()
                             self.farm()
 
                 except Exception as e:
                     self.logger.exception(e)
-                    self.send_telegram_message("Errore: " + str(e.message))
+
                 self.sleep()
 
         self.send_telegram_message("Bot Spento")
