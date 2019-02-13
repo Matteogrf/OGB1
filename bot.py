@@ -21,6 +21,13 @@ import hashlib
 
 socket.setdefaulttimeout(float(options['general']['timeout']))
 
+#
+# COMMANDS
+# stats
+# kill
+# stop_farmer
+# start_farmer
+
 
 class Bot(object):
     HEADERS = [('User-agent','Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36')]
@@ -86,6 +93,8 @@ class Bot(object):
         self._prepare_browser()
         self.round = 0
         self.free_slot = options['farming']['free_slot']
+        self.send_active_notification = options['general']['send_active_notification']
+        self.refresh_mother = options['general']['refresh_mother']
 
         # Comandi gestiti dal bot
         self.chatIdTelegram = options['credentials']['chat_id_telegram']
@@ -687,7 +696,7 @@ class Bot(object):
         for id in range(0, len(result)):
             timeMessage = result[id]['message']['date']
             chatId = result[id]['message']['chat']['id']
-            text = result[id]['message']['text']
+            command = result[id]['message']['text']
             update_id = result[id]['update_id']
             currentTime = int(time.time()) - 300
 
@@ -695,31 +704,22 @@ class Bot(object):
 
                 options.updateValue('credentials', 'last_update_id', str(update_id))
 
-                if text == '/resourcesfarmed':
+                if command == '/stats':
                     self.CMD_GET_FARMED_RES = True
-                elif text == '/ping':
-                    self.send_telegram_message("Pong")
-                elif text == '/stop':
+                elif command == '/kill':
                     self.CMD_STOP = True
-                elif text == '/stop_farmer':
+                elif command == '/stop_farmer':
                     self.CMD_FARM = False
                     self.send_telegram_message('Farmer fermato.')
-                elif text == '/start_farmer':
+                elif command == '/start_farmer':
                     self.CMD_FARM = True
                     self.send_telegram_message('Farmer riattivato.')
-                elif text == '/is_logged':
-                    self.send_telegram_message("Loggato: " + str(self.logged_in))
-                elif text == '/login':
-                    self.CMD_LOGIN = True
-                elif text == '/logout':
-                    self.logged_in =False
-                    self._prepare_browser()
-                elif text.split(' ')[0] == '/raccolta':
-                    target = text.split(' ')[1]
+                elif command.split(' ')[0] == '/raccolta':
+                    target = command.split(' ')[1]
                     self.send_transports_production(target)
                     self.logger.info('All planets send production to ' + str(target))
-                elif text.split(' ')[0] == '/attack_probe':
-                    target = text.split(' ')[1]
+                elif command.split(' ')[0] == '/attack_probe':
+                    target = command.split(' ')[1]
                     self.send_attack_of_probe(target)
                     self.logger.info('Attack of probes to ' + str(target) + ' sended')
 
@@ -837,12 +837,13 @@ class Bot(object):
     def refresh_mother(self):
         self.round = self.round + 1
         if self.round % 10 == 0:
-            self.br.open(self._get_url('main', self.get_mother()))
-            self.send_telegram_message("Bot attivo.")
+            if self.refresh_mother == 'YES':
+                self.br.open(self._get_url('main', self.get_mother()))
+
+            if self.send_active_notification == 'YES':
+               self.send_telegram_message("Bot attivo.")
 
     def start(self):
-        self.logger.info('Starting bot')
-
         while not self.CMD_STOP:
                 try:
                     self.get_command_from_telegram_bot()
