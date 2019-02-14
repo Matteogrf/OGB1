@@ -34,6 +34,8 @@ class Bot(object):
     RE_BUILD_REQUEST = re.compile(r"sendBuildRequest\(\'(.*)\', null, 1\)")
     RE_SERVER_TIME = re.compile(r"var serverTime=new Date\((.*)\);var localTime")
 
+    LANDING_PAGE = 'https://lobby.ogame.gameforge.com'
+
     # ship -> ship id on the page
     SHIPS = {
         'lm': '204',
@@ -173,10 +175,8 @@ class Bot(object):
         self.br.set_handle_referer(True)
         self.br.set_handle_robots(False)
         self.br.addheaders = self.HEADERS
+
     def _parse_build_url(self, js):
-        """
-        convert: `sendBuildRequest('url', null, 1)`; into: `url`
-        """
         return self.RE_BUILD_REQUEST.findall(js)[0]
 
     def _parse_server_time(self, content):
@@ -317,8 +317,6 @@ class Bot(object):
                     self.moons.append(m)
         except:
             self.logger.exception('Exception while fetching planets')
-        else:
-            self.check_attacks()
 
     def handle_planets(self):
         self.fetch_planets()
@@ -393,7 +391,7 @@ class Bot(object):
                 file.close()
         else:
 
-        # Per ora carico solo le risorse. Il resto non serve
+            # Per ora carico solo le risorse. Il resto non serve
             try:
                 file = open('resources_' + today + '.txt', 'w')
                 metal = int(soup.find(id='resources_metal').text.replace('.', ''))
@@ -470,7 +468,7 @@ class Bot(object):
             usati = text.split('/')[0]
             disponibili = text.split('/')[1]
 
-            if usati >= (disponibili - self.free_slot):
+            if int(usati) >= (int(disponibili) - int(self.free_slot)):
                 self.logger.info('No free slots (' + usati + '/' + disponibili + ')')
                 return False
 
@@ -547,19 +545,29 @@ class Bot(object):
         self.br.form['text'] = message
         self.br.submit()
 
-    def check_attacks(self):
+    def check(self):
         resp = self.br.open(self.PAGES['main']).read()
+        self.logger.warning(self.br.geturl())
+        if self.br.geturl().startswith(self.LANDING_PAGE):
+            self.send_telegram_message('Rilevata disconnessione. Tentativo di riconnessione in corso...')
+            self.logged_in = False
+            self.CMD_LOGIN = True
+            return
+
         soup = BeautifulSoup(resp)
 
         alert = soup.find(id='attack_alert')
         if not alert:
             self.logger.exception('Check attack failed')
+            self.send_telegram_message('Errore nella verifica di attacchi in corso.')
             return
         if 'noAttack' in alert.get('class', ''):
-            self.logger.info('Nessun attacco in corso')
+            self.logger.info('Nessun attacco in corso.')
             self.active_attacks = []
         else:
             self.logger.info('ATTACCO IN CORSO!')
+            self.send_telegram_message('Sono state rilevate missioni ostili in arrivo.')
+
             resp = self.br.open(self.PAGES['events'])
             soup = BeautifulSoup(resp)
             hostile = False
@@ -576,6 +584,7 @@ class Bot(object):
                     countDown = tr.find('td', 'countDown')
                     if countDown and 'hostile' in countDown.get('class', ''):
                         hostile = True
+
                         # First: check if attack was noticed
                         if tr.get('id'):
                             attack_id = tr.get('id').split('-')[1]
@@ -583,10 +592,12 @@ class Bot(object):
                             attack_id = countDown.get('id').split('-')[2]
                         if not attack_id or attack_id in [a.id for a in self.active_attacks]:
                             continue
+
                         if tr.get('class').split(' ')[0] == 'allianceAttack':
                             typeAttack = 'ATTACCO FEDERATO'
                         else:
                             typeAttack = 'ATTACCO'
+
                         if str(typeAttack) != str('ATTACCO FEDERATO') and tr.get('class').split(' ')[
                             0] != 'partnerInfo':
                             attackNew = True
@@ -604,6 +615,7 @@ class Bot(object):
                                 player.append(tr.find('td', 'sendMail').find('a').get('title'))
                             except Exception as e:
                                 self.logger.exception(e)
+
                         elif typeAttack == 'ATTACCO FEDERATO' or tr.get('class').split(' ')[0] == 'partnerInfo':
                             if tr.get('class').split(' ')[0] == 'partnerInfo':
                                 coordsOrigin = tr.find('td', 'coordsOrigin')
@@ -714,7 +726,7 @@ class Bot(object):
                 elif command == '/start_farmer':
                     self.CMD_FARM = True
                     self.send_telegram_message('Farmer riattivato.')
-                elif command.split(' ')[0] == '/raccolta':
+                elif command.split(' ')[0] == '/trasport_to':
                     target = command.split(' ')[1]
                     self.send_transports_production(target)
                     self.logger.info('All planets send production to ' + str(target))
@@ -817,7 +829,6 @@ class Bot(object):
                     break
 
     def load_farming_planets_info(self):
-        response = ''
         n = 1
         from_planet = options['farming'][self.bn_from_planet + str(n)]
         loop = True
@@ -834,20 +845,28 @@ class Bot(object):
         except Exception as e:
             self.logger.exception(e)
 
-    def refresh_mother(self):
+    def refresh(self):
         self.round = self.round + 1
         if self.round % 10 == 0:
             if self.refresh_mother == 'YES':
                 self.br.open(self._get_url('main', self.get_mother()))
 
             if self.send_active_notification == 'YES':
-               self.send_telegram_message("Bot attivo.")
+                self.send_telegram_message("Bot attivo.")
 
     def start(self):
         while not self.CMD_STOP:
                 try:
+                    # Ricevo i comandi telegram
                     self.get_command_from_telegram_bot()
 
+                    # Controllo se sono ancora loggato
+                    # Controllo eventuali attacchi in arrivo
+                    if self.logged_in:
+                        self.check()
+
+                    # Esecuzione Login
+                    # Carico risorse per statistiche
                     if self.CMD_LOGIN:
                         self.login_lobby()
                         if self.logged_in:
@@ -855,9 +874,9 @@ class Bot(object):
                             self.load_farming_planets_info()
                             self.CMD_LOGIN = False
 
+                    # Attività del BOT
                     if self.logged_in:
-                        self.check_attacks()
-                        self.refresh_mother()
+                        self.refresh()
                         if self.CMD_GET_FARMED_RES:
                             self.send_farmed_res()
                         if self.CMD_FARM:
@@ -866,6 +885,7 @@ class Bot(object):
                 except Exception as e:
                     self.logger.exception(e)
 
+                # Mi fermo
                 self.sleep()
 
         self.send_telegram_message("Bot Spento")
