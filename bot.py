@@ -23,10 +23,15 @@ socket.setdefaulttimeout(float(options['general']['timeout']))
 
 #
 # COMMANDS
-# stats
-# kill
-# stop_farmer
-# start_farmer
+# stats - Invia una stima del guadagno giornaliero
+# kill - Chiude il bot
+# stop_farmer - Smette di inviare attacchi
+# start_farmer - Riprende l'invio di attacchi
+# login - Riattiva il bot
+# logout - Sospende il bot
+# trasport_to - trasport_to 1:1:1
+# attack_probe - attack_probe 1:1:1
+#
 
 
 class Bot(object):
@@ -726,6 +731,14 @@ class Bot(object):
                 elif command == '/start_farmer':
                     self.CMD_FARM = True
                     self.send_telegram_message('Farmer riattivato.')
+                elif command == '/login':
+                    self.logged_in = False;
+                    self.CMD_LOGIN = True
+                    self.send_telegram_message('Tentativo di relogin in corso...')
+                elif command == '/logout':
+                    self.logged_in = False;
+                    self.CMD_LOGIN = False;
+                    self.send_telegram_message('Bot disconnesso.')
                 elif command.split(' ')[0] == '/trasport_to':
                     target = command.split(' ')[1]
                     self.send_transports_production(target)
@@ -777,7 +790,7 @@ class Bot(object):
             self.update_planet_resources(planet)
             numFleet = (self.RESOURCESTOSEND['metal']+self.RESOURCESTOSEND['crystal']+self.RESOURCESTOSEND['deuterium'])/25000
             if int(numFleet) > 150:
-                self.send_fleet(planet, target, fleet={'dt':numFleet}, resources = self.RESOURCESTOSEND, mission='transport',target='planet', speed='10')
+                self.send_fleet(planet, target, fleet={'dt':numFleet}, resources = self.RESOURCESTOSEND, mission='transport',target='moon', speed='10')
 
     def send_farmed_res(self):
         response = ''
@@ -816,7 +829,7 @@ class Bot(object):
         time.sleep(mini_sleep_time)
 
     def send_attack_of_probe(self,target):
-        attack= True
+        attack = True
         for planet in self.planets:
             if attack:
                 if self.send_fleet(planet, target, fleet={'ss': '1'}, speed='10'):
@@ -857,7 +870,7 @@ class Bot(object):
     def start(self):
         while not self.CMD_STOP:
                 try:
-                    # Ricevo i comandi telegram
+                    # Leggo comandi telegram
                     self.get_command_from_telegram_bot()
 
                     # Controllo se sono ancora loggato
@@ -876,6 +889,7 @@ class Bot(object):
 
                     # Attività del BOT
                     if self.logged_in:
+                        # Aggiorno pianeta madre ed invio messaggio "Bot Attivo" se richiesto
                         self.refresh()
                         if self.CMD_GET_FARMED_RES:
                             self.send_farmed_res()
