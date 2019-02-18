@@ -62,9 +62,19 @@ class Bot(object):
     MISSIONS = {
         'attack': '1',
         'transport': '3',
-        'station': '4',
-        'expedition': '15',
-        'collect': '8'
+        'deploy': '4',
+        'spy': '6',
+        'collect': '8',
+        'expedition': '15'
+    }
+
+    MISSIONS_REV = {
+        '1' : 'Attacco',
+        '3' : 'Trasporto',
+        '4' : 'Schieramento',
+        '6' : 'Spionaggio',
+        '8' : 'Raccolta',
+        '15': 'Spedizione'
     }
 
     TARGETS = {
@@ -243,7 +253,7 @@ class Bot(object):
                 driver.get(
                     "https://lobby-api.ogame.gameforge.com/users/me/loginLink?id=" + player_id + "&server[language]=it&server[number]=" + number)
             except:
-                self.logger.info('va bhe')
+                self.logger.info('')
 
             time.sleep(6)
 
@@ -470,11 +480,11 @@ class Bot(object):
             soup = BeautifulSoup(resp)
             span = soup.find('span', title='Slots flotta Usati/Totali')
             text = span.text.split(':')[1]
-            usati = text.split('/')[0]
-            disponibili = text.split('/')[1]
+            usati = int(text.split('/')[0])
+            disponibili = int(text.split('/')[1]) - int(self.free_slot)
 
-            if int(usati) >= (int(disponibili) - int(self.free_slot)):
-                self.logger.info('No free slots (' + usati + '/' + disponibili + ')')
+            if usati >= disponibili:
+                self.logger.info('No free slots (' + str(usati) + '/' +  str(disponibili) + ')')
                 return False
 
             for ship, num in fleet.iteritems():
@@ -552,7 +562,65 @@ class Bot(object):
 
     def check(self):
         resp = self.br.open(self.PAGES['main']).read()
-        self.logger.warning(self.br.geturl())
+
+        if self.br.geturl().startswith(self.LANDING_PAGE):
+            self.send_telegram_message('Rilevata disconnessione. Tentativo di riconnessione in corso...')
+            self.logged_in = False
+            self.CMD_LOGIN = True
+            return
+
+        soup = BeautifulSoup(resp)
+        alert = soup.find(id='attack_alert')
+        if not alert:
+            self.logger.exception('Attenzione: Errore nella verifica di attacchi in corso.')
+            self.send_telegram_message('Attenzione: Errore nella verifica di attacchi in corso.')
+            return
+
+        # 1 Controllo: Alert
+        if 'noAttack' in alert.get('class', ''):
+            self.logger.info('Nessun attacco in corso.')
+            self.active_attacks = []
+
+        if 'soon' in alert.get('class', ''):
+            self.logger.info('Sono state rilevate missioni ostili in arrivo.')
+            self.send_telegram_message('Sono state rilevate missioni ostili in arrivo.')
+
+        # 2 Controllo lista missioni in arrivo
+        resp = self.br.open(self.PAGES['events'])
+        soup = BeautifulSoup(resp)
+        rows = soup.findAll('tr', attrs={'class': 'eventFleet'})
+
+        for row in rows:
+            coordinatePartenza = "[]"
+            coordinateArrivo   = "[]"
+            player = []
+            detailsFleet = []
+            countDown = row.find('td', 'countDown')
+            missionType = row.get('data-mission-type');
+            if countDown and 'hostile' in countDown.get('class', ''):
+                orario = row.find('td', 'arrivalTime').text.split(' ')[0]
+                coords = row.find('td', 'coordsOrigin')
+                if coords and coords.find('a'):
+                    coordinatePartenza = coords.find('a').text.strip()[1:-1]
+
+                coords = row.find('td', 'destCoords')
+                if coords and coords.find('a'):
+                    coordinateArrivo = coords.find('a').text.strip()[1:-1]
+
+                player.append(row.find('td', 'sendMail').find('a').get('title'))
+                detailsFleet.append(row.find('td', 'detailsFleet').span.text.replace('.', ''))
+
+                text = self.MISSIONS_REV[missionType] + ' in corso in [' + str(coordinateArrivo) + ']' + \
+                      '\n Arrivo: ' + str(orario) + \
+                      '\n Da: ' + str(player[0]) + ' [' + str(coordinatePartenza) + ']'\
+                      ' Navi: ' + str(detailsFleet[0])
+
+                self.send_telegram_message(text)
+
+
+    def checkxxx(self):
+        resp = self.br.open(self.PAGES['main']).read()
+
         if self.br.geturl().startswith(self.LANDING_PAGE):
             self.send_telegram_message('Rilevata disconnessione. Tentativo di riconnessione in corso...')
             self.logged_in = False
