@@ -69,11 +69,11 @@ class Bot(object):
     }
 
     MISSIONS_REV = {
-        '1' : 'Attacco',
-        '3' : 'Trasporto',
-        '4' : 'Schieramento',
-        '6' : 'Spionaggio',
-        '8' : 'Raccolta',
+        '1': 'Attacco',
+        '3': 'Trasporto',
+        '4': 'Schieramento',
+        '6': 'Spionaggio',
+        '8': 'Raccolta',
         '15': 'Spedizione'
     }
 
@@ -613,7 +613,7 @@ class Bot(object):
                 text = self.MISSIONS_REV[missionType] + ' in corso in [' + str(coordinateArrivo) + ']' + \
                       '\n Arrivo: ' + str(orario) + \
                       '\n Da: ' + str(player[0]) + ' [' + str(coordinatePartenza) + ']'\
-                      ' Navi: ' + str(detailsFleet[0])
+                      + str(detailsFleet[0] + ' navi' )
 
                 self.send_telegram_message(text)
 
