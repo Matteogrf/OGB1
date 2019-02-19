@@ -591,7 +591,7 @@ class Bot(object):
         rows = soup.findAll('tr', attrs={'class': 'eventFleet'})
 
         attacco = "";
-        attaccanti = "":
+        attaccanti = ""
         for row in rows:
             coordinatePartenza = "[]"
             coordinateArrivo   = "[]"
@@ -613,7 +613,7 @@ class Bot(object):
                 detailsFleet.append(row.find('td', 'detailsFleet').span.text.replace('.', ''))
 
                 attacco = self.MISSIONS_REV[missionType] + ' in corso: [' + str(coordinateArrivo) + '] ' + str(orario);
-                text = attacco + \ '\n Da: ' + str(player[0]) + ' [' + str(coordinatePartenza) + '] ' + str(detailsFleet[0] + ' navi')
+                text = attacco + '\n Da: ' + str(player[0]) + ' [' + str(coordinatePartenza) + '] ' + str(detailsFleet[0] + ' navi')
 
                 self.send_telegram_message(text)
 
