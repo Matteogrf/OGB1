@@ -65,15 +65,18 @@ class Bot(object):
         'deploy': '4',
         'spy': '6',
         'collect': '8',
+        'mooncrash' : '9',
         'expedition': '15'
     }
 
     MISSIONS_REV = {
         '1': 'Attacco',
+        '2': 'Attacco federale',
         '3': 'Trasporto',
         '4': 'Schieramento',
         '6': 'Spionaggio',
         '8': 'Raccolta',
+        '9': 'Distruzione Luna',
         '15': 'Spedizione'
     }
 
@@ -588,10 +591,8 @@ class Bot(object):
         # 2 Controllo lista missioni in arrivo
         resp = self.br.open(self.PAGES['events'])
         soup = BeautifulSoup(resp)
-        rows = soup.findAll('tr', attrs={'class': 'eventFleet'})
+        rows = soup.findAll('tr')
 
-        attacco = "";
-        attaccanti = ""
         for row in rows:
             coordinatePartenza = "[]"
             coordinateArrivo   = "[]"
@@ -600,14 +601,37 @@ class Bot(object):
             countDown = row.find('td', 'countDown')
             missionType = row.get('data-mission-type');
             if countDown and 'hostile' in countDown.get('class', ''):
+                # Attacco federale
+                if missionType == '2':
+                    if row.get('class').split(' ')[0] == 'allianceAttack':
+                        orario = row.find('td', 'arrivalTime').text.split(' ')[0]
+                        coords = row.find('td', 'destCoords')
+                        if coords and coords.find('a'):
+                            coordinateArrivo = coords.find('a').text.strip()[1:-1]
+                        text = self.MISSIONS_REV[missionType] + ' in corso: [' + str(coordinateArrivo) + '] Arrivo: ' + str(orario);
+                        self.send_telegram_message(text)
+
+                    if row.get('class').split(' ')[0] == 'partnerInfo':
+                        coords = row.find('td', 'coordsOrigin')
+                        if coords and coords.find('a'):
+                            coordinatePartenza = coords.find('a').text.strip()[1:-1]
+
+                        player.append(row.find('td', 'sendMail').find('a').get('title'))
+                        detailsFleet.append(row.find('td', 'detailsFleet').span.text.replace('.', ''))
+
+                        text = '\t\t\tDa: ' + str(player[0]) + ' [' + str(coordinatePartenza) + '] ' + str(detailsFleet[0] + ' navi')
+                        self.send_telegram_message(text)
+                    continue
+
+                # Attacco normale
                 orario = row.find('td', 'arrivalTime').text.split(' ')[0]
                 coords = row.find('td', 'coordsOrigin')
                 if coords and coords.find('a'):
-                    coordinatePartenza = coords.find('a').text.strip()[1:-1]
+                   coordinatePartenza = coords.find('a').text.strip()[1:-1]
 
                 coords = row.find('td', 'destCoords')
                 if coords and coords.find('a'):
-                    coordinateArrivo = coords.find('a').text.strip()[1:-1]
+                   coordinateArrivo = coords.find('a').text.strip()[1:-1]
 
                 player.append(row.find('td', 'sendMail').find('a').get('title'))
                 detailsFleet.append(row.find('td', 'detailsFleet').span.text.replace('.', ''))
@@ -617,112 +641,6 @@ class Bot(object):
 
                 self.send_telegram_message(text)
 
-
-    def checkxxx(self):
-        resp = self.br.open(self.PAGES['main']).read()
-
-        if self.br.geturl().startswith(self.LANDING_PAGE):
-            self.send_telegram_message('Rilevata disconnessione. Tentativo di riconnessione in corso...')
-            self.logged_in = False
-            self.CMD_LOGIN = True
-            return
-
-        soup = BeautifulSoup(resp)
-
-        alert = soup.find(id='attack_alert')
-        if not alert:
-            self.logger.exception('Check attack failed')
-            self.send_telegram_message('Errore nella verifica di attacchi in corso.')
-            return
-        if 'noAttack' in alert.get('class', ''):
-            self.logger.info('Nessun attacco in corso.')
-            self.active_attacks = []
-        else:
-            self.logger.info('ATTACCO IN CORSO!')
-            self.send_telegram_message('Sono state rilevate missioni ostili in arrivo.')
-
-            resp = self.br.open(self.PAGES['events'])
-            soup = BeautifulSoup(resp)
-            hostile = False
-            attack_id = 0
-
-            text = ''
-            arrivalTime = ''
-            originCoords = []
-            destCoords = ''
-            player = []
-            attackNew = False
-            try:
-                for tr in soup.findAll('tr'):
-                    countDown = tr.find('td', 'countDown')
-                    if countDown and 'hostile' in countDown.get('class', ''):
-                        hostile = True
-
-                        # First: check if attack was noticed
-                        if tr.get('id'):
-                            attack_id = tr.get('id').split('-')[1]
-                        elif countDown.get('id'):
-                            attack_id = countDown.get('id').split('-')[2]
-                        if not attack_id or attack_id in [a.id for a in self.active_attacks]:
-                            continue
-
-                        if tr.get('class').split(' ')[0] == 'allianceAttack':
-                            typeAttack = 'ATTACCO FEDERATO'
-                        else:
-                            typeAttack = 'ATTACCO'
-
-                        if str(typeAttack) != str('ATTACCO FEDERATO') and tr.get('class').split(' ')[
-                            0] != 'partnerInfo':
-                            attackNew = True
-                            try:
-                                # Attack first discovered: save attack info
-                                arrivalTime = tr.find('td', 'arrivalTime').text.split(' ')[0]
-                                coordsOrigin = tr.find('td', 'coordsOrigin')
-                                if coordsOrigin:
-                                    if coordsOrigin.find('a'):
-                                        originCoords.append(coordsOrigin.find('a').text.strip()[1:-1])
-                                destCoords = tr.find('td', 'destCoords')
-                                if destCoords:
-                                    destCoords = destCoords.find('a').text.strip()[1:-1]
-                                detailsFleet.append(tr.find('td', 'detailsFleet').span.text.replace('.', ''))
-                                player.append(tr.find('td', 'sendMail').find('a').get('title'))
-                            except Exception as e:
-                                self.logger.exception(e)
-
-                        elif typeAttack == 'ATTACCO FEDERATO' or tr.get('class').split(' ')[0] == 'partnerInfo':
-                            if tr.get('class').split(' ')[0] == 'partnerInfo':
-                                coordsOrigin = tr.find('td', 'coordsOrigin')
-                                if coordsOrigin:
-                                    if coordsOrigin.find('a'):
-                                        originCoords.append(coordsOrigin.find('a').text.strip())
-                                player.append(tr.find('td', 'sendMail').find('a').get('title'))
-                                detailsFleet.append(tr.find('td', 'detailsFleet').span.text.replace('.', ''))
-                            else:
-                                attackNew = True
-                                arrivalTime = tr.find('td', 'arrivalTime').text.split(' ')[0]
-                                destCoords = tr.find('td', 'destCoords')
-                                if destCoords:
-                                    destCoords = destCoords.find('a').text.strip()[1:-1]
-                                detailsFleet = tr.find('td', 'detailsFleet').span.text.replace('.', '')
-
-                    if attackNew:
-                        text = text + '\n\n' + str(typeAttack) + ' IN CORSO\n' \
-                                'Orario di arrivo: ' + str(arrivalTime) + '\n' \
-                                'Coordinate di arrivo: ' + str(destCoords) + '\n'
-                    for i in range(0, len(player), 1):
-                        text = text + '\t\t\t\t\tGIOCATORE: ' + str(player[i]) + '\n' \
-                                '\t\t\t\t\tCoordinate di partenza: ' + str(originCoords[i]) + '\n' \
-                                '\t\t\t\t\tNumero navi in arrivo: ' + str(detailsFleet[i]) + '\n'
-                    arrivalTime = ''
-                    destCoords = ''
-                    detailsFleet = []
-                    player = []
-                    attackNew = False
-                    self.send_telegram_message(text)
-                if not hostile:
-                    self.active_attacks = []
-            except Exception as e:
-                self.logger.exception(e)
 
     def send_telegram_message(self, message):
         url = 'https://api.telegram.org/' + str(self.botTelegram) + '/sendMessage?'
