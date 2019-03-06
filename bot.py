@@ -127,17 +127,32 @@ class Bot(object):
         self.CMD_GET_FARMED_RES = False
         self.test_login(username)
 
+        # Preparo la lista di pianeti da attaccare
         n = 1
         self.farm_no = []
         self.bn_farms = 'farms_'
         self.bn_from_planet = 'from_planet_'
+
+        self.attack_from = [];
+        self.attack_to = [];
+
         loop = True
         while loop:
             try:
                 farms = options['farming'][self.bn_farms + str(n)].split(' ')
                 self.farm_no.append((randint(0, len(farms) - 1) if farms else 0))
+
                 from_planet = options['farming'][self.bn_from_planet + str(n)]
                 self.logger.info("Pianeta: " + from_planet + " Inizio dalla farm n: " + str(self.farm_no[n - 1]))
+
+                pianeti_da_attaccare = []
+                for farm in farms:
+                    p = Planet(coords=farm)
+                    pianeti_da_attaccare.append(p)
+
+                self.attack_from.append(from_planet)
+                self.attack_to.append(pianeti_da_attaccare)
+
                 n += 1
             except Exception as e:
                 loop = False
@@ -155,6 +170,7 @@ class Bot(object):
             'galaxyCnt': self.MAIN_URL + '?page=galaxyContent',
             'events': self.MAIN_URL + '?page=eventList',
             'messages': self.MAIN_URL + '?page=messages',
+            'cr': self.MAIN_URL + '?page=messages&tab=21&ajax=1',
             'apiPlayers': 'https://' + self.server + '/api/players.xml',
         }
         self.planets = []
@@ -771,6 +787,38 @@ class Bot(object):
             except Exception as e:
                 loop = False
 
+        #
+        # Invio farmata di sonde intelligente
+        #
+
+    def farm_intelligent(self):
+
+        # Carico settings
+        ships_kind = options['farming']['ships_kind']
+        ships_number = options['farming']['ships_number']
+        speed = options['farming']['ships_speed']
+
+        # Ciclo sui pianeti da cui attaccare
+        n = 0
+        for from_planet in self.attack_from:
+            # Seleziono pianeta di attacco
+            planet = self.find_planet(coords=from_planet, is_moon=True)
+
+            # Invio attacchi finche ci sono navi
+            attack = True;
+            planets = self.attack_to[n]
+            planets.sort()
+
+            i = 0
+            while attack:
+                planet_to_attack = planets[i]
+                planet_to_attack.score = 0
+                attack = self.send_fleet(planet, planet_to_attack.coords, fleet={ships_kind: ships_number}, speed=speed)
+                i += 1
+                i = i % planets.count()
+
+            n += 1
+
     def send_transports_production(self,target):
         for planet in self.planets:
             self.update_planet_resources(planet)
@@ -844,6 +892,22 @@ class Bot(object):
         except Exception as e:
             self.logger.exception(e)
 
+    def read_cr(self):
+        # Apertura pagina messaggi
+        resp = self.br.open(self.PAGES['messages']).read()
+        self.miniSleep()
+
+        # Apertura pagina CR
+        resp = self.br.open (self.PAGES['cr']).read()
+        self.miniSleep()
+
+        # Leggo i messaggi
+        soup = BeautifulSoup(resp)
+
+        #for li in soup.findAll('li', {'class': ['msg']}):
+
+
+
     def refresh(self):
         self.round = self.round + 1
         if self.round % 10 == 0:
@@ -880,7 +944,8 @@ class Bot(object):
                         if self.CMD_GET_FARMED_RES:
                             self.send_farmed_res()
                         if self.CMD_FARM:
-                            self.farm()
+                            self.read_cr()
+                            self.farm_intelligent()
 
                 except Exception as e:
                     self.logger.exception(e)
