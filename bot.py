@@ -18,6 +18,8 @@ import cookielib
 from selenium.webdriver.chrome.options import Options
 from lxml import etree
 import hashlib
+from datetime import timedelta
+
 
 socket.setdefaulttimeout(float(options['general']['timeout']))
 
@@ -98,11 +100,13 @@ class Bot(object):
         20: '2',
         10: '1'
     }
+
     RESOURCESTOSEND = {
         'metal' : 0,
         'crystal' : 0,
         'deuterium' : 0
     }
+
     def __init__(self, username=None, password=None, server=None):
 
         self.server = server
@@ -112,6 +116,8 @@ class Bot(object):
         self._prepare_logger()
         self._prepare_browser()
         self.round = 0
+        self.round_to_sleep = 0
+        self.getNextRoundSleep()
         self.free_slot = options['farming']['free_slot']
         self.send_active_notification = options['general']['send_active_notification']
         self.refresh_mother = options['general']['refresh_mother']
@@ -125,22 +131,16 @@ class Bot(object):
         self.CMD_FARM = True
         self.CMD_LOGIN = True
         self.CMD_GET_FARMED_RES = False
+        self.CMD_SUSPENDED = False
         self.test_login(username)
 
-        n = 1
-        self.farm_no = []
-        self.bn_farms = 'farms_'
-        self.bn_from_planet = 'from_planet_'
-        loop = True
-        while loop:
-            try:
-                farms = options['farming'][self.bn_farms + str(n)].split(' ')
-                self.farm_no.append((randint(0, len(farms) - 1) if farms else 0))
-                from_planet = options['farming'][self.bn_from_planet + str(n)]
-                self.logger.info("Pianeta: " + from_planet + " Inizio dalla farm n: " + str(self.farm_no[n - 1]))
-                n += 1
-            except Exception as e:
-                loop = False
+        ships_number = int(options['farming']['ships_number'])
+        ship_cargo = int(options['farming']['ship_cargo'])
+        self.max_score = ships_number * ship_cargo
+
+        self.targhets = []
+        self.load_targhet_planets_info()
+        self.processed_id = []
 
         self.MAIN_URL = 'https://' + self.server + '/game/index.php'
         self.PAGES = {
@@ -155,8 +155,10 @@ class Bot(object):
             'galaxyCnt': self.MAIN_URL + '?page=galaxyContent',
             'events': self.MAIN_URL + '?page=eventList',
             'messages': self.MAIN_URL + '?page=messages',
+            'messages_attack': self.MAIN_URL + '?page=messages&tab=21&ajax=1',
             'apiPlayers': 'https://' + self.server + '/api/players.xml',
         }
+
         self.planets = []
         self.moons = []
         self.active_attacks = []
@@ -167,11 +169,24 @@ class Bot(object):
         self.server_time = self.local_time = datetime.now()
         self.time_diff = 0
 
+        self.suspend_time = 0
+        self.suspended_start_time = datetime.now()
+
+
+
     def _get_url(self, page, planet=None):
         url = self.PAGES[page]
         if planet is not None:
             url += '&cp=%s' % planet.id
         return url
+
+    def getNextRoundSleep(self):
+        general = options['general']
+        min = int(general['action_every_x_loop']) - randint(0, int(general['x_loop_variance']))
+        max = int(general['action_every_x_loop']) + randint(0, int(general['x_loop_variance']))
+        self.round_to_sleep = randint(min, max)
+        self.logger.info("Prossima pausa fra " + str(self.round_to_sleep) + " giri.")
+
 
     def _prepare_logger(self):
         self.logger = logging.getLogger("mechanize")
@@ -250,15 +265,16 @@ class Bot(object):
 
             # Clicco su login
             driver.find_element_by_id("loginSubmit").click()
-            time.sleep(6)
+            time.sleep(7)
+
             # Recupero URL login
             try:
                 driver.get(
                     "https://lobby-api.ogame.gameforge.com/users/me/loginLink?id=" + player_id + "&server[language]=it&server[number]=" + number)
             except:
-                self.logger.info('')
+                self.logger.info('Errore')
 
-            time.sleep(6)
+            time.sleep(7)
 
             # Richiamo il login
             html = driver.page_source
@@ -305,7 +321,7 @@ class Bot(object):
 
     def fetch_planets(self):
         self.logger.info('Fetching planets..')
-
+        self.miniSleep()
         resp = self.br.open(self.PAGES['main']).read()
 
         self.calc_time(resp)
@@ -347,6 +363,7 @@ class Bot(object):
             self.update_planet_fleet(m)
 
     def update_planet_fleet(self, planet):
+        self.miniSleep()
         resp = self.br.open(self._get_url('fleet', planet))
         soup = BeautifulSoup(resp)
         ships = {}
@@ -363,6 +380,7 @@ class Bot(object):
 
     def update_planet_resources_farmed(self, planet):
         try:
+            self.miniSleep()
             resp = self.br.open(self._get_url('fleet', planet))
             soup = BeautifulSoup(resp)
             metal = int(soup.find(id='resources_metal').text.replace('.', '')) - int(planet.resources['metal'])
@@ -469,9 +487,14 @@ class Bot(object):
             self.logger.error('Cannot send fleet to the same planet')
             return False
 
-        self.logger.info('Sending fleet from %s to %s (%s)' % (origin_planet, destination, mission))
+        nNavi = 0
+        for ship, num in fleet.iteritems():
+            nNavi += int(num)
+
+        self.logger.info('Sending fleet from %s to %s (%s) number: %s' % (origin_planet, destination, mission, str(nNavi)))
 
         try:
+            self.miniSleep()
             resp = self.br.open(self._get_url('fleet', origin_planet))
             try:
                 self.br.select_form(name='shipsChosen')
@@ -531,6 +554,7 @@ class Bot(object):
                     soup = BeautifulSoup(resp)
                     if not soup.find('span', {'class': ['status_abbr_inactive', 'status_abbr_longinactive']}):
                         self.logger.info('Giocatore attivo. Attacco annullato.')
+                        self.removeTarghet(destination)
                         return True
 
                 self.br.select_form(name='sendForm')
@@ -556,6 +580,7 @@ class Bot(object):
         return True
 
     def send_message(self, url, player, subject, message):
+        self.miniSleep()
         self.logger.info('Sending message to %s: %s' % (player, message))
         self.br.open(url)
         self.br.select_form(nr=0)
@@ -564,6 +589,7 @@ class Bot(object):
         self.br.submit()
 
     def check(self):
+        self.miniSleep()
         resp = self.br.open(self.PAGES['main']).read()
 
         if self.br.geturl().startswith(self.LANDING_PAGE):
@@ -589,6 +615,7 @@ class Bot(object):
             self.send_telegram_message('Sono state rilevate missioni ostili in arrivo.')
 
         # 2 Controllo lista missioni in arrivo
+        self.miniSleep()
         resp = self.br.open(self.PAGES['events'])
         soup = BeautifulSoup(resp)
         rows = soup.findAll('tr')
@@ -734,42 +761,49 @@ class Bot(object):
                     self.send_attack_of_probe(target)
                     self.logger.info('Attack of probes to ' + str(target) + ' sended')
 
-    #
-    # Invio farmata di sonde
-    #
+        #
+        # Invio farmata di sonde
+        #
+
     def farm(self):
-        # Carico settings
+
+        # Carico impostazioni di attacco
         ships_kind = options['farming']['ships_kind']
-        ships_number = options['farming']['ships_number']
+        ships_number = int(options['farming']['ships_number'])
         speed = options['farming']['ships_speed']
+        ship_number_min = int(options['farming']['ship_number_min'])
+        ship_cargo = int(options['farming']['ship_cargo'])
 
         # Ciclo sui pianeti da farmare
-        n = 1
-
-        farms = options['farming'][self.bn_farms + str(n)].split(' ')
-        from_planet = options['farming'][self.bn_from_planet + str(n)]
-        loop = True
-        while loop:
+        for targhets_list in self.targhets:
             # Seleziono pianeta di attacco
-            planet = self.find_planet(coords=from_planet, is_moon=True)
+            planet = self.find_planet(coords=targhets_list[0], is_moon=True)
+            n = 1
+            loop = True
+            while loop:
+                # Controllo che ci siano farm
+                if n >= len(targhets_list):
+                    loop = False
+                    continue
 
-            # Controllo che ci siano farm
-            l = len(farms)
-            if not (l == 0 or not farms[0]):
+                # Invio attacchi finche ci navi disponibili
+                p = targhets_list[n]
+                risorse = p.resources['metal'] + p.resources['metal'] + p.resources['metal']
 
-                # Seleziono la prossima farm da attaccare
-                farm = farms[self.farm_no[n - 1] % l]
+                if risorse == 0 or risorse >= ((ships_number*ship_cargo)-100):
+                    navi = ships_number
+                else:
+                    navi = (risorse/2) / ship_cargo
+                    navi = self.arrotonda(navi)
 
-                # Invio attacchi finche ci sono navi
-                while self.send_fleet(planet,farm,fleet={ships_kind: ships_number},speed=speed):
-                    self.farm_no[n - 1] += 1
-                    farm = farms[self.farm_no[n - 1] % l]
-            n += 1
-            try:
-                farms = options['farming'][self.bn_farms + str(n)].split(' ')
-                from_planet = options['farming'][self.bn_from_planet + str(n)]
-            except Exception as e:
-                loop = False
+                if navi < ship_number_min:
+                    loop = False
+                else:
+                    if self.send_fleet(planet, p.coords, fleet={ships_kind: navi}, speed=speed):
+                        n += 1
+                        p.score = 0
+                    else:
+                        loop = False
 
     def send_transports_production(self,target):
         for planet in self.planets:
@@ -781,7 +815,7 @@ class Bot(object):
     def send_farmed_res(self):
         response = ''
         n = 1
-        from_planet = options['farming'][self.bn_from_planet + str(n)]
+        from_planet = options['farming']['from_planet_' + str(n)]
         loop = True
         try:
             while loop:
@@ -789,7 +823,7 @@ class Bot(object):
                 response = response + self.update_planet_resources_farmed(planet)
                 n += 1
                 try:
-                    from_planet = options['farming'][self.bn_from_planet + str(n)]
+                    from_planet = options['farming']['from_planet_' + str(n)]
                 except:
                     loop = False
 
@@ -800,21 +834,45 @@ class Bot(object):
         self.send_telegram_message(response)
         self.CMD_GET_FARMED_RES = False
 
-    def sleep(self):
+    def farm_sleep(self):
         sleep_options = options['general']
-        min = int(sleep_options['seed']) - randint(0, int(sleep_options['check_interval']))
-        max = int(sleep_options['seed']) + randint(0, int(sleep_options['check_interval']))
+        min = int(sleep_options['after_farm_sleep']) - randint(0, int(sleep_options['after_farm_variance']))
+        max = int(sleep_options['after_farm_sleep']) + randint(0, int(sleep_options['after_farm_variance']))
         sleep_time = randint(min, max)
         self.logger.info('Bot in attesa per %s secondi' % sleep_time)
         if self.active_attacks:
             sleep_time = 60
         time.sleep(sleep_time)
 
+    def idle_sleep(self):
+        sleep_options = options['general']
+        min = int(sleep_options['idle_sleep']) - randint(0, int(sleep_options['idle_variance']))
+        max = int(sleep_options['idle_sleep']) + randint(0, int(sleep_options['idle_variance']))
+        sleep_time = randint(min, max)
+
+        if self.active_attacks:
+            sleep_time = 60
+
+
+        if self.CMD_SUSPENDED:
+            nextWakeUp = datetime.now() + timedelta(seconds=sleep_time)
+            maxWakeUp  = self.suspended_start_time + timedelta(minutes=self.suspend_time)
+            if nextWakeUp > maxWakeUp:
+                delta = maxWakeUp - datetime.now()
+                sleep_time = delta.seconds
+                self.logger.info('forzato max sleep a %s secondi' % sleep_time)
+
+        self.logger.info('Bot in attesa per %s secondi' % sleep_time)
+        time.sleep(sleep_time)
+
     def miniSleep(self):
-        mini_sleep_time = randint(400, 2500) / 1000
+        sleep_options = options['general']
+        min = int(sleep_options['click_time_min'])
+        max = int(sleep_options['click_time_max'])
+        mini_sleep_time = randint(min, max) / 1000
         time.sleep(mini_sleep_time)
 
-    def send_attack_of_probe(self,target):
+    def send_attack_of_probe(self, target):
         attack = True
         for planet in self.planets:
             if attack:
@@ -829,7 +887,7 @@ class Bot(object):
 
     def load_farming_planets_info(self):
         n = 1
-        from_planet = options['farming'][self.bn_from_planet + str(n)]
+        from_planet = options['farming']['from_planet_' + str(n)]
         loop = True
         try:
             while loop:
@@ -837,7 +895,7 @@ class Bot(object):
                 self.update_planet_info(planet)
                 try:
                     n += 1
-                    from_planet = options['farming'][self.bn_from_planet + str(n)]
+                    from_planet = options['farming']['from_planet_' + str(n)]
                 except:
                     loop = False
 
@@ -845,13 +903,31 @@ class Bot(object):
             self.logger.exception(e)
 
     def refresh(self):
-        self.round = self.round + 1
-        if self.round % 10 == 0:
+        if self.round == self.round_to_sleep:
             if self.refresh_mother == 'YES':
+                self.miniSleep()
                 self.br.open(self._get_url('main', self.get_mother()))
 
             if self.send_active_notification == 'YES':
                 self.send_telegram_message("Bot attivo.")
+
+            self.round = 0
+            self.getNextRoundSleep()
+
+            # Sospensione temporanea degli attacchi
+            stop_attack_bot = options['general']['stop_attack_bot']
+            if stop_attack_bot == 'YES':
+                general = options['general']
+                min = int(general['stop_attack_for_minutes']) - randint(0, int(general['stop_attack_for_variance']))
+                max = int(general['stop_attack_for_minutes']) + randint(0, int(general['stop_attack_for_variance']))
+                self.suspend_time = randint(min, max)
+                self.logger.info("Attacchi sospesi per " + str(self.suspend_time) + " minuti.")
+                self.send_telegram_message("Attacchi sospesi per " + str(self.suspend_time) + " minuti.")
+                self.CMD_SUSPENDED = True
+                self.suspended_start_time = datetime.now()
+        else:
+            self.round = self.round + 1
+
 
     def start(self):
         while not self.CMD_STOP:
@@ -875,19 +951,33 @@ class Bot(object):
 
                     # Attività del BOT
                     if self.logged_in:
-                        # Aggiorno pianeta madre ed invio messaggio "Bot Attivo" se richiesto
-                        self.refresh()
-                        if self.CMD_GET_FARMED_RES:
-                            self.send_farmed_res()
-                        if self.CMD_FARM:
-                            self.farm()
+                        # Stato: sospensione attacchi
+                        if self.CMD_SUSPENDED:
+                            if (self.suspended_start_time + timedelta(minutes=self.suspend_time)) < datetime.now():
+                                self.CMD_SUSPENDED = False
+                                self.logger.info("Attacchi ripresi dopo pausa.")
+                                self.send_telegram_message("Attacchi ripresi dopo pausa.")
+
+                        if not self.CMD_SUSPENDED:
+                            # Aggiorno pianeta madre ed invio messaggio "Bot Attivo" se richiesto
+                            self.refresh()
+                            if self.CMD_GET_FARMED_RES:
+                                self.send_farmed_res()
+                            if self.CMD_FARM and not self.CMD_SUSPENDED:
+                                self.farm()
+                                self.farm_sleep()
+                                self.analizeAttacks()
+                                self.orderAttacks()
+
+                        if not self.CMD_FARM or self.CMD_SUSPENDED:
+                                self.idle_sleep()
+                    else:
+                        self.idle_sleep()
 
                 except Exception as e:
                     self.logger.exception(e)
 
-                # Mi fermo
-                self.sleep()
-
+        self.save_targhet_planets_info()
         self.send_telegram_message("Bot Spento")
 
     def getPlayerId( self, name):
@@ -898,6 +988,176 @@ class Bot(object):
         for player in players.findall('player[@name=\'' + name + '\']'):
             return player.get('id')
         return ""
+
+
+    def load_targhet_planets_info(self):
+        n = 1
+        loop = True
+        self.logger.info("Caricamento targhets..")
+        while loop:
+            try:
+                tlist = []
+                planet = options['farming']['from_planet_' + str(n)]
+                tlist.append(planet)
+
+                targhets = options['farming']['farms_' + str(n)].split(' ')
+                j = 1
+                for targhet in targhets:
+                    try:
+                        p = Planet(coords=targhet)
+                        p.score = self.max_score - 50
+                        tlist.append(p)
+                        j += 1
+                    except Exception as s:
+                        self.logger.info("Coordinata non valida: " + targhet)
+
+                self.targhets.append(tlist)
+                n += 1
+            except Exception as e:
+                loop = False
+
+    def save_targhet_planets_info(self):
+        j = 1
+        for targhet in self.targhets:
+            i = 0
+            inattivi = ""
+            while i < len(targhet):
+                inattivi = inattivi + targhet[i].coords + " "
+                i += 1
+
+            options.updateValue('farming', 'farms_' + str(j), inattivi.strip())
+            j += 1
+
+    def analizeAttacks(self):
+        # Apertura pagina messaggi
+        self.miniSleep()
+        resp = self.br.open(self._get_url('messages'))
+
+        # Apertura pagina combattimenti
+        self.miniSleep()
+        resp = self.br.open(self._get_url('messages_attack'))
+
+        soup = BeautifulSoup(resp)
+        for li in soup.findAll('li', 'msg msg_new'):
+
+            # Id messaggio
+            id = li.get('data-msg-id')
+            if id in self.processed_id:
+                continue
+
+            self.processed_id.append(id)
+
+            # Coordinate targhet
+            targhet = li.find('a', 'txt_link').text
+            targhet = targhet.strip('[')
+            targhet = targhet.strip(']')
+
+            # self.logger.info("Targhet: " + str(targhet))
+
+            # Leggo le risorse
+            elementi = li.find('span', 'msg_ctn msg_ctn3 tooltipLeft')
+            title = elementi.get('title')
+            metallo = "0"
+            cristallo = "0"
+            deuterio = "0"
+
+            # self.logger.info("Risorse = " + title)
+            text_part = title.split('<br/>')
+            for part in text_part:
+                if part.startswith('Metallo: '):
+                    metallo = part.strip('Metallo: ').replace('.', '')
+                if part.startswith('Cristallo: '):
+                    cristallo = part.strip('Cristallo: ').replace('.', '')
+                if part.startswith('Deuterio: '):
+                    deuterio = part.strip('Deuterio: ').replace('.', '')
+
+            # Calcolo score
+            score = int(metallo) + (int(cristallo)*2) + (int(deuterio) * 3)
+            self.logger.info(targhet + ": M " + metallo + " C " + cristallo + " D " + deuterio + " Score: " + str(score))
+
+            # Cerco pianeta
+            trovato = False
+            i = 0
+            while i < len(self.targhets) and not trovato:
+                j = 1
+                t = self.targhets[i]
+                while j < len(t) and not trovato:
+                    p = t[j]
+                    if p.coords == targhet:
+                       trovato=True
+                       p.score = score
+                       p.resources['metal']= int(metallo)
+                       p.resources['crystal']= int(cristallo)
+                       p.resources['deuterium']= int(deuterio)
+                    j += 1
+                i += 1
+
+    def removeTarghet(self, targhet):
+        # Cerco pianeta
+        trovato = False
+        i = 0
+        while i < len(self.targhets) and not trovato:
+            j = 1
+            t = self.targhets[i]
+            while j < len(t) and not trovato:
+                p = t[j]
+                if p.coords == targhet:
+                    trovato = True
+                    del t[j]
+                    self.logger.info("Rimosso pianeta: " + targhet)
+                j += 1
+            i += 1
+        if not trovato:
+            self.logger.info("Errore ricerca targhet: " + targhet)
+
+    def orderAttacks(self):
+
+        # Aumento le priorita
+        priority_upgrade = options['farming']['priority_upgrade']
+
+
+        for tlist in self.targhets:
+            for i in range(1, len(tlist)):
+                p = tlist[i]
+                p.score += int(priority_upgrade)
+
+                if p.score > self.max_score:
+                    p.score = self.max_score
+
+        # Riordino lista inattivi
+        for tlist in self.targhets:
+            self.inactiveSort(tlist)
+
+        # Stampo per capirci qualcosa
+        #for tlist in self.targhets:
+        #    for i in range(0, len(tlist)):
+        #        if i == 0:
+        #            self.logger.info("Lista inattivi del pianeta " + tlist[i])
+        #        else:
+        #            p = tlist[i]
+        #            self.logger.info("Pianeta " + p.coords + " Score: " + str(p.score))
+
+
+    def inactiveSort(self, l):
+        differenze = 1
+        while differenze > 0:
+            differenze = 0
+            for i in range(2, len(l)):
+                p = l[i-1]
+                p2 = l[i]
+                if p.score < p2.score:
+                    l[i - 1] = p2
+                    l[i] = p
+                    differenze += 1
+            #self.logger.info("Differenze: " + str(differenze))
+
+    def arrotonda(self, n):
+        ship_arrotondamento = int(options['farming']['ship_arrotondamento'])
+        numero = ship_arrotondamento
+        while n > numero:
+            numero = numero + ship_arrotondamento
+        return numero
+
 
 if __name__ == "__main__":
     credentials = options['credentials']

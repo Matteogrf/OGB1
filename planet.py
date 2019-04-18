@@ -5,7 +5,7 @@ from config import options
 
 
 class Planet(object):
-    def __init__(self, id, name, coords, url, in_construction_mode=False):
+    def __init__(self, id=0, name="", coords="", url="", in_construction_mode=False):
         self.id = id
         self.name = name
         self.url = url
@@ -13,6 +13,9 @@ class Planet(object):
         self.mother = False
         self.galaxy, self.system, self.position = map(int, self.coords.split(":"))
         self.in_construction_mode = in_construction_mode
+
+        self.score = 100000000
+
         self.mines = (
             'metalMine',
             'crystalMine',
