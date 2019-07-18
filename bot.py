@@ -254,23 +254,25 @@ class Bot(object):
                 self.logger.info('No banner found')
 
             # Vado sulla Login Form
-            driver.find_element_by_link_text("Login").click()
+            # driver.find_element_by_link_text("Log in").click()
+            driver.find_element_by_xpath("//span[contains(text(), 'Log in')]").click()
 
             # Immetto Credenziali
-            usernameLogin = driver.find_element_by_id("usernameLogin")
-            passwordLogin = driver.find_element_by_id("passwordLogin")
+            usernameLogin = driver.find_element_by_name("email")
+            passwordLogin = driver.find_element_by_name("password")
 
             usernameLogin.send_keys(username)
             passwordLogin.send_keys(password)
 
             # Clicco su login
-            driver.find_element_by_id("loginSubmit").click()
+            driver.find_element_by_class_name("button-primary").submit()
+
             time.sleep(7)
 
             # Recupero URL login
             try:
                 driver.get(
-                    "https://lobby-api.ogame.gameforge.com/users/me/loginLink?id=" + player_id + "&server[language]=it&server[number]=" + number)
+                    "https://lobby.ogame.gameforge.com/api/users/me/loginLink?id=" + player_id + "&server[language]=it&server[number]=" + number)
             except:
                 self.logger.info('Errore')
 
@@ -773,7 +775,8 @@ class Bot(object):
         speed = options['farming']['ships_speed']
         ship_number_min = int(options['farming']['ship_number_min'])
         ship_cargo = int(options['farming']['ship_cargo'])
-
+        calcola_sonde_da_inviare = options['farming']['calcola_sonde_da_inviare']
+        max_attack_per_planet = int(options['farming']['max_attack_per_planet'])
         # Ciclo sui pianeti da farmare
         for targhets_list in self.targhets:
             # Seleziono pianeta di attacco
@@ -782,22 +785,23 @@ class Bot(object):
             loop = True
             while loop:
                 # Controllo che ci siano farm
-                if n >= len(targhets_list):
+                if n >= len(targhets_list) or n > max_attack_per_planet:
                     loop = False
                     continue
 
                 # Invio attacchi finche ci navi disponibili
                 p = targhets_list[n]
-                risorse = p.resources['metal'] + p.resources['metal'] + p.resources['metal']
+                risorse = p.resources['metal'] + p.resources['crystal'] + p.resources['deuterium']
 
-                if risorse == 0 or risorse >= ((ships_number*ship_cargo)-100):
+                if risorse == 0 or risorse >= ((ships_number*ship_cargo)-1000) or calcola_sonde_da_inviare == 'NO':
                     navi = ships_number
                 else:
                     navi = (risorse/2) / ship_cargo
                     navi = self.arrotonda(navi)
 
                 if navi < ship_number_min:
-                    loop = False
+                    n += 1
+                    continue
                 else:
                     if self.send_fleet(planet, p.coords, fleet={ships_kind: navi}, speed=speed):
                         n += 1
@@ -805,7 +809,7 @@ class Bot(object):
                     else:
                         loop = False
 
-    def send_transports_production(self,target):
+    def send_transports_production(self, target):
         for planet in self.planets:
             self.update_planet_resources(planet)
             numFleet = (self.RESOURCESTOSEND['metal']+self.RESOURCESTOSEND['crystal']+self.RESOURCESTOSEND['deuterium'])/25000
@@ -903,7 +907,7 @@ class Bot(object):
             self.logger.exception(e)
 
     def refresh(self):
-        if self.round == self.round_to_sleep:
+        if self.round >= self.round_to_sleep:
             if self.refresh_mother == 'YES':
                 self.miniSleep()
                 self.br.open(self._get_url('main', self.get_mother()))
@@ -1001,11 +1005,14 @@ class Bot(object):
                 tlist.append(planet)
 
                 targhets = options['farming']['farms_' + str(n)].split(' ')
+                initialPlanet = randint(1, len(targhets))
+                targhets = targhets[initialPlanet: len(targhets)] + targhets[0: initialPlanet]
+
                 j = 1
                 for targhet in targhets:
                     try:
                         p = Planet(coords=targhet)
-                        p.score = self.max_score - 50
+                        p.score = self.max_score
                         tlist.append(p)
                         j += 1
                     except Exception as s:
@@ -1019,7 +1026,7 @@ class Bot(object):
     def save_targhet_planets_info(self):
         j = 1
         for targhet in self.targhets:
-            i = 0
+            i = 1
             inattivi = ""
             while i < len(targhet):
                 inattivi = inattivi + targhet[i].coords + " "
@@ -1072,7 +1079,15 @@ class Bot(object):
                     deuterio = part.strip('Deuterio: ').replace('.', '')
 
             # Calcolo score
-            score = int(metallo) + (int(cristallo)*2) + (int(deuterio) * 3)
+            risorse = int(metallo) + int(cristallo) + int(deuterio)
+            ships_number = int(options['farming']['ships_number'])
+            ship_cargo = int(options['farming']['ship_cargo'])
+            max_cargo = ((ships_number * ship_cargo) -2000)
+            score = int(metallo) + (int(cristallo) * 2) + (int(deuterio) * 3)
+            if( risorse < max_cargo ):
+                score = score * risorse / max_cargo / 2
+
+
             self.logger.info(targhet + ": M " + metallo + " C " + cristallo + " D " + deuterio + " Score: " + str(score))
 
             # Cerco pianeta
@@ -1086,9 +1101,9 @@ class Bot(object):
                     if p.coords == targhet:
                        trovato=True
                        p.score = score
-                       p.resources['metal']= int(metallo)
-                       p.resources['crystal']= int(cristallo)
-                       p.resources['deuterium']= int(deuterio)
+                       p.resources['metal'] = int(metallo)
+                       p.resources['crystal'] = int(cristallo)
+                       p.resources['deuterium'] = int(deuterio)
                     j += 1
                 i += 1
 
@@ -1121,9 +1136,6 @@ class Bot(object):
                 p = tlist[i]
                 p.score += int(priority_upgrade)
 
-                if p.score > self.max_score:
-                    p.score = self.max_score
-
         # Riordino lista inattivi
         for tlist in self.targhets:
             self.inactiveSort(tlist)
@@ -1138,16 +1150,16 @@ class Bot(object):
         #            self.logger.info("Pianeta " + p.coords + " Score: " + str(p.score))
 
 
-    def inactiveSort(self, l):
+    def inactiveSort(self, lista):
         differenze = 1
         while differenze > 0:
             differenze = 0
-            for i in range(2, len(l)):
-                p = l[i-1]
-                p2 = l[i]
+            for i in range(2, len(lista)):
+                p = lista[i-1]
+                p2 = lista[i]
                 if p.score < p2.score:
-                    l[i - 1] = p2
-                    l[i] = p
+                    lista[i - 1] = p2
+                    lista[i] = p
                     differenze += 1
             #self.logger.info("Differenze: " + str(differenze))
 
