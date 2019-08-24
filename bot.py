@@ -31,10 +31,12 @@ socket.setdefaulttimeout(float(options['general']['timeout']))
 # start_farmer - Riprende l'invio di attacchi
 # login - Riattiva il bot
 # logout - Sospende il bot
-# trasport_to - trasport_to 1:1:1
-# attack_probe - attack_probe 1:1:1
+# fs - flees save: fs 1.. 24 ore
 #
 
+# Da verificare e sistemare
+# attack_probe - attack_probe 1:1:1
+# trasport_to - trasport_to 1:1:1
 
 class Bot(object):
     HEADERS = [('User-agent','Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36')]
@@ -66,6 +68,7 @@ class Bot(object):
         'transport': '3',
         'deploy': '4',
         'spy': '6',
+        'colon': '7',
         'collect': '8',
         'mooncrash' : '9',
         'expedition': '15'
@@ -99,12 +102,6 @@ class Bot(object):
         30: '3',
         20: '2',
         10: '1'
-    }
-
-    RESOURCESTOSEND = {
-        'metal' : 0,
-        'crystal' : 0,
-        'deuterium' : 0
     }
 
     def __init__(self, username=None, password=None, server=None):
@@ -157,6 +154,7 @@ class Bot(object):
             'messages': self.MAIN_URL + '?page=messages',
             'messages_attack': self.MAIN_URL + '?page=messages&tab=21&ajax=1',
             'apiPlayers': 'https://' + self.server + '/api/players.xml',
+            'apiGalaxy': 'https://' + self.server + '/api/universe.xml',
         }
 
         self.planets = []
@@ -231,12 +229,23 @@ class Bot(object):
             if name == p.name or coords == p.coords or id == p.id:
                 return p
 
+    def download_api_files( self ):
+        # Scarico file Players
+        resp = self.br.open(self.PAGES['apiPlayers'], timeout=10)
+        file("players.xml", 'w').write(resp.get_data().decode())
+
+        # Scarico galassia
+        resp = self.br.open(self.PAGES['apiGalaxy'], timeout=10)
+        file("galaxy.xml", 'w').write(resp.get_data().decode())
+
     def login_lobby(self, username=None, password=None, server=None):
         username = username or self.username
         password = password or self.password
         server = server or self.server
         player = options['credentials']['player']
+        self.download_api_files()
         player_id = self.getPlayerId(player)
+
         number = server[1:4]
         try:
             chrome_options = Options()
@@ -382,19 +391,19 @@ class Bot(object):
 
     def update_planet_resources_farmed(self, planet):
         try:
-            self.miniSleep()
-            resp = self.br.open(self._get_url('fleet', planet))
-            soup = BeautifulSoup(resp)
-            metal = int(soup.find(id='resources_metal').text.replace('.', '')) - int(planet.resources['metal'])
-            crystal = int(soup.find(id='resources_crystal').text.replace('.', '')) - int(planet.resources['crystal'])
-            deuterium = int(soup.find(id='resources_deuterium').text.replace('.', '')) - int(planet.resources['deuterium'])
+            self.update_planet_resources(planet)
+
+            metal = int(planet.resources['metal']) - int(planet.initial_resources['metal'])
+            crystal = int(planet.resources['crystal']) - int(planet.initial_resources['crystal'])
+            deuterium = int(planet.resources['deuterium']) - int(planet.initial_resources['deuterium'])
 
             text = 'Pianeta: ' + str(planet.coords) + \
                    '\n\t\t\tTotale risorse farmate: ' + "{:,}".format(metal + crystal + deuterium) + \
                    '\n\t\t\t\t\t\tMetallo: ' + "{:,}".format(metal) + \
                    '\n\t\t\t\t\t\tCristallo: ' + "{:,}".format(crystal) + \
                    '\n\t\t\t\t\t\tDeuterio: ' + "{:,}".format(deuterium) + '\n\n'
-        except:
+        except Exception as e:
+            self.logger.exception(e)
             text = 'Exception while updating resources info'
 
         return text
@@ -402,60 +411,51 @@ class Bot(object):
     def update_planet_info(self, planet):
         self.miniSleep()
         self.logger.info('Carico le risorse del pianeta: ' + planet.coords)
-        resp = self.br.open(self._get_url('resources', planet))
-        soup = BeautifulSoup(resp)
+
         today = datetime.today().strftime('%Y-%m-%d')
         found = False
         if os.path.isfile('resources_'+today+'.txt'):
-            file = open('resources_'+today+'.txt', 'r')
-            for line in file:
+            f = open('resources_'+today+'.txt', 'r')
+            for line in f:
                 if line.split('/')[0] == planet.coords:
                     found = True
-                    planet.resources['metal'] = line.split('/')[1]
-                    planet.resources['crystal'] = line.split('/')[2]
-                    planet.resources['deuterium'] = line.split('/')[3]
-            file.close()
-            if found == False:
-                file = open('resources_' + today + '.txt', 'a')
-                metal = int(soup.find(id='resources_metal').text.replace('.', ''))
-                planet.resources['metal'] = metal
-                crystal = int(soup.find(id='resources_crystal').text.replace('.', ''))
-                planet.resources['crystal'] = crystal
-                deuterium = int(soup.find(id='resources_deuterium').text.replace('.', ''))
-                planet.resources['deuterium'] = deuterium
-                energy = int(soup.find(id='resources_energy').text.replace('.', ''))
-                planet.resources['energy'] = energy
-                file.write(str(planet.coords) + '/' + str(metal) + '/' + str(crystal) + '/' + str(deuterium) + '\n')
-                file.close()
-        else:
+                    planet.initial_resources['metal'] = line.split('/')[1]
+                    planet.initial_resources['crystal'] = line.split('/')[2]
+                    planet.initial_resources['deuterium'] = line.split('/')[3]
+            f.close()
 
-            # Per ora carico solo le risorse. Il resto non serve
+        if not found:
             try:
-                file = open('resources_' + today + '.txt', 'w')
-                metal = int(soup.find(id='resources_metal').text.replace('.', ''))
-                planet.resources['metal'] = metal
-                crystal = int(soup.find(id='resources_crystal').text.replace('.', ''))
-                planet.resources['crystal'] = crystal
-                deuterium = int(soup.find(id='resources_deuterium').text.replace('.', ''))
-                planet.resources['deuterium'] = deuterium
-                energy = int(soup.find(id='resources_energy').text.replace('.', ''))
-                planet.resources['energy'] = energy
-                file.write(str(planet.coords)+'/'+str(metal)+'/'+str(crystal)+'/'+str(deuterium)+'\n')
-                file.close()
+                self.load_initial_resources(planet, today)
             except:
-                self.logger.exception('Exception while updating resources info')
+                self.logger.exception('Exception while loading resources info')
+
+    def load_initial_resources(self, planet, today):
+        self.update_planet_resources(planet)
+
+        metal = planet.resources['metal']
+        crystal = planet.resources['crystal']
+        deuterium = planet.resources['deuterium']
+        energy = planet.resources['energy']
+
+        planet.initial_resources['metal'] = metal
+        planet.initial_resources['crystal'] = crystal
+        planet.initial_resources['deuterium'] = deuterium
+        planet.initial_resources['energy'] = energy
+
+        file = open('resources_' + today + '.txt', 'a')
+        file.write(str(planet.coords) + '/' + str(metal) + '/' + str(crystal) + '/' + str(deuterium) + '\n')
+        file.close()
 
     def update_planet_resources(self, planet):
         self.miniSleep()
         try:
-            resp = self.br.open(self._get_url('resources', planet))
+            resp = self.br.open(self._get_url('main', planet))
             soup = BeautifulSoup(resp)
-            metal = int(soup.find(id='resources_metal').text.replace('.', ''))
-            self.RESOURCESTOSEND['metal']=metal
-            crystal = int(soup.find(id='resources_crystal').text.replace('.', ''))
-            self.RESOURCESTOSEND['crystal'] = crystal
-            deuterium = int(soup.find(id='resources_deuterium').text.replace('.', ''))
-            self.RESOURCESTOSEND['deuterium'] = deuterium
+
+            planet.resources['metal']= int(soup.find(id='resources_metal').text.replace('.', ''))
+            planet.resources['crystal'] = int(soup.find(id='resources_crystal').text.replace('.', ''))
+            planet.resources['deuterium'] = int(soup.find(id='resources_deuterium').text.replace('.', ''))
         except:
             self.logger.exception('Exception while updating resources info')
 
@@ -485,9 +485,9 @@ class Bot(object):
 
 
     def send_fleet(self, origin_planet, destination, fleet={}, resources={},mission='attack', target='planet', speed=10):
-        if origin_planet.coords == destination:
-            self.logger.error('Cannot send fleet to the same planet')
-            return False
+        #if origin_planet.coords == destination:
+        #    self.logger.error('Cannot send fleet to the same planet')
+        #    return False
 
         nNavi = 0
         for ship, num in fleet.iteritems():
@@ -512,7 +512,7 @@ class Bot(object):
             disponibili = int(text.split('/')[1]) - int(self.free_slot)
 
             if usati >= disponibili:
-                self.logger.info('No free slots (' + str(usati) + '/' +  str(disponibili) + ')')
+                self.logger.info('No free slots (' + str(usati) + '/' + str(disponibili) + ')')
                 return False
 
             for ship, num in fleet.iteritems():
@@ -551,6 +551,7 @@ class Bot(object):
 
             try:
                 resp = self.br.submit()
+
                 # In caso di attacco, verifico che sia inattivo.
                 if mission == 'attack':
                     soup = BeautifulSoup(resp)
@@ -561,6 +562,7 @@ class Bot(object):
 
                 self.br.select_form(name='sendForm')
             except Exception as e:
+                self.logger.exception(e)
                 return False
 
             self.br.form.find_control("mission").readonly = False
@@ -756,13 +758,21 @@ class Bot(object):
                     self.send_telegram_message('Bot disconnesso.')
                 elif command.split(' ')[0] == '/trasport_to':
                     target = command.split(' ')[1]
+                    pla = command.split(' ')[1]
                     self.send_transports_production(target)
                     self.logger.info('All planets send production to ' + str(target))
                 elif command.split(' ')[0] == '/attack_probe':
                     target = command.split(' ')[1]
                     self.send_attack_of_probe(target)
                     self.logger.info('Attack of probes to ' + str(target) + ' sended')
-
+                elif command.split(' ')[0] == '/fs':
+                    params = command.split(' ')
+                    if len(params) != 2:
+                        self.send_telegram_message('Numero parametri errato')
+                    else:
+                        self.CMD_FARM = False
+                        self.send_telegram_message('Farmer fermato.')
+                        self.fleet_save(params[1])
         #
         # Invio farmata di sonde
         #
@@ -793,11 +803,15 @@ class Bot(object):
                 p = targhets_list[n]
                 risorse = p.resources['metal'] + p.resources['crystal'] + p.resources['deuterium']
 
-                if risorse == 0 or risorse >= ((ships_number*ship_cargo)-1000) or calcola_sonde_da_inviare == 'NO':
+                if risorse == 0 or risorse >= ((ships_number*ship_cargo)- 1000 ) or calcola_sonde_da_inviare == 'NO':
                     navi = ships_number
                 else:
-                    navi = (risorse/2) / ship_cargo
-                    navi = self.arrotonda(navi)
+                    if risorse >= ((p.sended_probe * ship_cargo) - 1000):
+                        navi = (p.sended_probe + ships_number) / 2
+                        navi = self.arrotonda(navi)
+                    else:
+                        navi = (risorse/2) / ship_cargo
+                        navi = self.arrotonda(navi)
 
                 if navi < ship_number_min:
                     n += 1
@@ -806,15 +820,95 @@ class Bot(object):
                     if self.send_fleet(planet, p.coords, fleet={ships_kind: navi}, speed=speed):
                         n += 1
                         p.score = 0
+                        p.sended_probe = navi
                     else:
                         loop = False
+
+    def fleet_save(self, fleet_type):
+        # Ciclo sui pianeti da flettare
+        moons_to_fleet = options['fleet']['moons_to_fleet'].split(' ')
+
+        # Prima fase: svuoto pianeta su luna
+        self.trasport_to_moon(moons_to_fleet)
+        self.send_telegram_message('Fine svuotamento pianeti. Aspetto 90 secondi..')
+        time.sleep(80)
+        self.send_telegram_message('Inizio invio fleet save')
+
+        # Caricamento dati
+        system_difference = int(options['fleet']['fs_'+fleet_type].split(' ')[0])
+        speed = options['fleet']['fs_'+fleet_type].split(' ')[1]
+        self.logger.info('Sistemi di differenza: ' + str(system_difference) + ' velocita: ' + speed)
+
+        for moon in moons_to_fleet:
+            # Seleziono pianeta di attacco
+            planet = self.find_planet(coords=moon, is_moon=True)
+            self.update_planet_resources(planet)
+            self.update_planet_fleet(planet)
+
+            targhet = self.findPlanetWhereFleet(planet, system_difference)
+
+            if planet.has_ships():
+                res = self.send_fleet(planet,
+                                targhet,
+                                fleet=planet.ships,
+                                mission='colon',
+                                speed=speed,
+                                resources=planet.resources)
+                if res == True:
+                    self.send_telegram_message('Flettata luna ' + moon + " in " + targhet + " speed: " +speed + "0%")
+                    # Verifico che tutto sia stato flettato correttamente
+                    self.update_planet_resources(planet)
+                    self.update_planet_fleet(planet)
+                    if planet.has_ships():
+                        self.send_telegram_message('Verifica fleet save ' + moon + 'fallita. Sono presenti navi!')
+                    if planet.has_resources():
+                        self.send_telegram_message('Verifica fleet save ' + moon + 'fallita. Sono presenti risorse!')
+                else:
+                    self.send_telegram_message('Errore fleet luna ' + moon + " in " + targhet + ". Verificare a mano dopo!")
+            else:
+                self.send_telegram_message('Attenzione: Non sono state trovate navi su ' + moon)
+
+
+
+    def trasport_to_moon( self, moons_to_fleet ):
+        self.send_telegram_message('Inizio svuotamento pianeti su luna')
+        for moon in moons_to_fleet:
+            # Seleziono pianeta da svuotare
+            planet = self.find_planet(coords=moon, is_moon=False)
+            self.update_planet_resources(planet)
+            self.update_planet_fleet(planet)
+            self.send_fleet(planet, planet.coords, fleet={'dt': planet.ships['dt']}, resources=planet.resources,
+                            mission='transport',
+                            target='moon', speed='10')
+
+    def findPlanetWhereFleet( self, planet, system_difference):
+        galaxy = etree.parse('galaxy.xml').getroot()
+
+        galassia = planet.coords.split(':')[0]
+        sistema = int(planet.coords.split(':')[1])
+        pianeta = 1
+
+        # Controllo se il targhet è valido
+        while True:
+           targhet = galassia + ":" + str((sistema + system_difference) % 500) + ":" + str(pianeta)
+           x = galaxy.find('planet[@coords=\'' + targhet + '\']')
+           if (x == None):
+               break
+           else:
+               self.logger.info('Posizione: ' + targhet + ' occupata!')
+               pianeta += 1
+               if pianeta > 15:
+                   pianeta = 1
+                   system_difference += 1
+
+        return targhet
 
     def send_transports_production(self, target):
         for planet in self.planets:
             self.update_planet_resources(planet)
-            numFleet = (self.RESOURCESTOSEND['metal']+self.RESOURCESTOSEND['crystal']+self.RESOURCESTOSEND['deuterium'])/25000
+            numFleet = (planet.resources['metal']+planet.resources['crystal']+planet.resources['deuterium'])/25000
             if int(numFleet) > 150:
-                self.send_fleet(planet, target, fleet={'dt':numFleet}, resources = self.RESOURCESTOSEND, mission='transport',target='moon', speed='10')
+                self.send_fleet(planet, target, fleet={'dt':numFleet}, resources = planet.resources, mission='transport',target='moon', speed='10')
 
     def send_farmed_res(self):
         response = ''
@@ -856,7 +950,6 @@ class Bot(object):
 
         if self.active_attacks:
             sleep_time = 60
-
 
         if self.CMD_SUSPENDED:
             nextWakeUp = datetime.now() + timedelta(seconds=sleep_time)
@@ -985,9 +1078,6 @@ class Bot(object):
         self.send_telegram_message("Bot Spento")
 
     def getPlayerId( self, name):
-        # Scarico file Players
-        resp = self.br.open(self.PAGES['apiPlayers'], timeout=10)
-        file("players.xml", 'w').write(resp.get_data().decode())
         players = etree.parse('players.xml').getroot()
         for player in players.findall('player[@name=\'' + name + '\']'):
             return player.get('id')
@@ -1016,6 +1106,7 @@ class Bot(object):
                         tlist.append(p)
                         j += 1
                     except Exception as s:
+                        self.logger.exception(s)
                         self.logger.info("Coordinata non valida: " + targhet)
 
                 self.targhets.append(tlist)
@@ -1082,11 +1173,10 @@ class Bot(object):
             risorse = int(metallo) + int(cristallo) + int(deuterio)
             ships_number = int(options['farming']['ships_number'])
             ship_cargo = int(options['farming']['ship_cargo'])
-            max_cargo = ((ships_number * ship_cargo) -2000)
+            max_cargo = ((ships_number * ship_cargo) - 2000)
             score = int(metallo) + (int(cristallo) * 2) + (int(deuterio) * 3)
             if( risorse < max_cargo ):
                 score = score * risorse / max_cargo / 2
-
 
             self.logger.info(targhet + ": M " + metallo + " C " + cristallo + " D " + deuterio + " Score: " + str(score))
 
@@ -1130,7 +1220,6 @@ class Bot(object):
         # Aumento le priorita
         priority_upgrade = options['farming']['priority_upgrade']
 
-
         for tlist in self.targhets:
             for i in range(1, len(tlist)):
                 p = tlist[i]
@@ -1139,16 +1228,6 @@ class Bot(object):
         # Riordino lista inattivi
         for tlist in self.targhets:
             self.inactiveSort(tlist)
-
-        # Stampo per capirci qualcosa
-        #for tlist in self.targhets:
-        #    for i in range(0, len(tlist)):
-        #        if i == 0:
-        #            self.logger.info("Lista inattivi del pianeta " + tlist[i])
-        #        else:
-        #            p = tlist[i]
-        #            self.logger.info("Pianeta " + p.coords + " Score: " + str(p.score))
-
 
     def inactiveSort(self, lista):
         differenze = 1
@@ -1161,7 +1240,6 @@ class Bot(object):
                     lista[i - 1] = p2
                     lista[i] = p
                     differenze += 1
-            #self.logger.info("Differenze: " + str(differenze))
 
     def arrotonda(self, n):
         ship_arrotondamento = int(options['farming']['ship_arrotondamento'])

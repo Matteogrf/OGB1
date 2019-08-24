@@ -14,6 +14,7 @@ class Planet(object):
         self.galaxy, self.system, self.position = map(int, self.coords.split(":"))
         self.in_construction_mode = in_construction_mode
 
+        self.sended_probe = 0
         self.score = 100000000
 
         self.mines = (
@@ -21,6 +22,13 @@ class Planet(object):
             'crystalMine',
             'deuteriumMine'
         )
+
+        self.initial_resources = {
+            'metal': 0,
+            'crystal': 0,
+            'deuterium':0,
+            'energy':0
+        }
 
         self.resources = {
             'metal': 0,
@@ -143,6 +151,9 @@ class Planet(object):
         Return true if any ship is stationing on the planet
         '''
         return any(self.ships.values())
+
+    def has_resources( self ):
+        return self.resources['metal'] + self.resources['crystal'] + self.resources['deuterium'] > 0
 
     def get_distance(self, planet):
         """
