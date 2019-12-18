@@ -2,6 +2,7 @@
 from math import radians
 
 from config import options
+from datetime import datetime
 
 
 class Planet(object):
@@ -13,7 +14,7 @@ class Planet(object):
         self.mother = False
         self.galaxy, self.system, self.position = map(int, self.coords.split(":"))
         self.in_construction_mode = in_construction_mode
-
+        self.resource_update_time = datetime.now()
         self.sended_probe = 0
         self.score = 100000000
 
@@ -169,6 +170,9 @@ class Planet(object):
         d += (abs(p - self.position))
 
         return d
+
+    def calcola_score(self):
+        self.score = self.resources['metal'] + (self.resources['crystal'] * 2) + (self.resources['deuterium'] * 3)
 
     def get_fleet_for_resources(self, r):
         total = sum([r.get('metal', 0), r.get('crystal', 0), r.get('deuterium', 0)])
