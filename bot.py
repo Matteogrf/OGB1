@@ -16,6 +16,7 @@ from urllib import urlencode
 
 
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver import ActionChains
 
 from planet import Planet, Moon
 from config import options
@@ -519,6 +520,7 @@ class Bot(object):
     def send_fleet(self, origin_planet, destination, fleet={}, resources={},mission='attack', target='planet', speed=10,
                    fetchPlanet=True):
 
+        self.miniSleep()
         nNavi = 0
         for ship, num in fleet.iteritems():
             nNavi += int(num)
@@ -526,10 +528,9 @@ class Bot(object):
         self.logger.info('Sending fleet from %s to %s (%s) number: %s' % (origin_planet, destination, mission, str(nNavi)))
 
         try:
-            self.miniSleep()
-
             if fetchPlanet:
                 self.driver.get(self._get_url('fleet', origin_planet))
+                self.miniSleep()
 
             soup = BeautifulSoup(self.driver.page_source)
 
@@ -558,7 +559,8 @@ class Bot(object):
                 if num > 0:
                     input.send_keys(str(num))
                 else:
-                    input.send_keys(str(available))
+                    if available > 0:
+                        input.send_keys(str(available))
 
             self.miniSleep()
 
@@ -572,6 +574,11 @@ class Bot(object):
             self.driver.find_element_by_id("system").send_keys(system)
             self.driver.find_element_by_id("position").send_keys(position)
 
+            element = self.driver.find_element_by_xpath('//div[@class="steps"]/div[@data-step="'+speed+'"]')
+            ActionChains(self.driver).move_to_element(element)
+            self.miniSleep()
+            element.click()
+
             element = self.driver.find_element_by_id(self.TARGETS[target])
             self.driver.execute_script("arguments[0].click();", element)
 
@@ -584,15 +591,20 @@ class Bot(object):
             # In caso di attacco, verifico che sia inattivo.
             if mission == 'attack':
                 element = self.driver.find_element_by_class_name('targetPlayerName')
-                try:
-                    element.find_elements_by_class_name('status_abbr_longinactive')
-                except NoSuchElementException as e1:
+                if element.text != 'spazio profondo':
                     try:
-                        element.find_elements_by_class_name('status_abbr_inactive')
-                    except NoSuchElementException as e2:
-                        self.logger.info('Giocatore attivo. Attacco annullato.')
-                        self.removeTarghet(destination)
-                        return True
+                        element.find_elements_by_class_name('status_abbr_longinactive')
+                    except NoSuchElementException as e1:
+                        try:
+                            element.find_elements_by_class_name('status_abbr_inactive')
+                        except NoSuchElementException as e2:
+                            self.logger.info('Giocatore attivo. Attacco annullato.')
+                            self.removeTarghet(destination)
+                            return True
+                else:
+                    self.logger.info('Giocatore non presente. Attacco annullato.')
+                    self.removeTarghet(destination)
+                    return True
 
             element = self.driver.find_element_by_id("missionButton"+self.MISSIONS[mission])
             self.driver.execute_script("arguments[0].click();", element)
@@ -610,6 +622,14 @@ class Bot(object):
             element = self.driver.find_element_by_id("sendFleet")
             self.driver.execute_script("arguments[0].click();", element)
             self.miniSleep()
+            self.miniSleep()
+
+            if mission == 'colon':
+                element = self.driver.find_element_by_id("errorBoxDecisionYes")
+                if element:
+                    self.driver.execute_script("arguments[0].click();", element)
+
+
         except Exception as e:
             self.logger.exception(e)
             return True
@@ -851,8 +871,8 @@ class Bot(object):
 
         # Prima fase: svuoto pianeta su luna
         self.trasport_to_moon(moons_to_fleet)
-        self.send_telegram_message('Fine svuotamento pianeti. Aspetto 90 secondi..')
-        time.sleep(80)
+        self.send_telegram_message('Fine svuotamento pianeti. Aspetto 40 secondi..')
+        time.sleep(40)
         self.send_telegram_message('Inizio invio fleet save')
 
         # Caricamento dati
