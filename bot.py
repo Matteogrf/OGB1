@@ -415,8 +415,8 @@ class Bot(object):
 
         ships = {}
         for k, v in self.SHIPS.iteritems():
-            li = soup.find('li', {"data-technology": v})
             try:
+                li = soup.find('li', {"data-technology": v})
                 available = int(li.find('span').find('span')['data-value'])
             except:
                 available = 0
@@ -847,10 +847,10 @@ class Bot(object):
                     navi = ships_number
                 else:
                     if risorse >= ((p.sended_probe * ship_cargo) - 1000):
-                        navi = (p.sended_probe + ships_number) / 2
+                        navi = (p.sended_probe + ships_number) * 3 / 4
                         navi = self.arrotonda(navi)
                     else:
-                        navi = (risorse/2) / ship_cargo
+                        navi = (risorse * 3 / 4) / ship_cargo
                         navi = self.arrotonda(navi)
 
                 if navi < ship_number_min:
