@@ -17,6 +17,7 @@ from urllib import urlencode
 
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver import ActionChains
+from selenium.webdriver.support.wait import WebDriverWait
 
 from planet import Planet, Moon
 from config import options
@@ -26,6 +27,8 @@ from selenium.webdriver.chrome.options import Options
 from lxml import etree
 import hashlib
 from datetime import timedelta
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 
 
 socket.setdefaulttimeout(float(options['general']['timeout']))
@@ -445,8 +448,6 @@ class Bot(object):
 
     def update_planet_info(self, planet):
         self.miniSleep()
-        self.logger.info('Carico le risorse del pianeta: ' + planet.coords)
-
         today = datetime.today().strftime('%Y-%m-%d')
         found = False
         if os.path.isfile('resources_'+today+'.txt'):
@@ -461,6 +462,7 @@ class Bot(object):
 
         if not found:
             try:
+                self.logger.info('Carico le risorse del pianeta: ' + planet.coords)
                 self.load_initial_resources(planet, today)
             except:
                 self.logger.exception('Exception while loading resources info')
@@ -486,9 +488,14 @@ class Bot(object):
         self.miniSleep()
         try:
             soup = self.readPage(self._get_url('main', planet))
-            planet.resources['metal']= int(soup.find(id='resources_metal').text.replace('.', ''))
-            planet.resources['crystal'] = int(soup.find(id='resources_crystal').text.replace('.', ''))
-            planet.resources['deuterium'] = int(soup.find(id='resources_deuterium').text.replace('.', ''))
+
+            m = soup.find(id='resources_metal')["data-raw"].split(".")[0]
+            c = soup.find(id='resources_crystal')["data-raw"].split(".")[0]
+            d = soup.find(id='resources_deuterium')["data-raw"].split(".")[0]
+
+            planet.resources['metal']= int(m)
+            planet.resources['crystal'] = int(c)
+            planet.resources['deuterium'] = int(d)
         except:
             self.logger.exception('Exception while updating resources info')
 
@@ -528,9 +535,9 @@ class Bot(object):
         self.logger.info('Sending fleet from %s to %s (%s) number: %s' % (origin_planet, destination, mission, str(nNavi)))
 
         try:
-            if fetchPlanet:
-                self.driver.get(self._get_url('fleet', origin_planet))
-                self.miniSleep()
+            #if fetchPlanet:
+            self.driver.get(self._get_url('fleet', origin_planet))
+            self.miniSleep()
 
             soup = BeautifulSoup(self.driver.page_source)
 
@@ -544,6 +551,7 @@ class Bot(object):
                 self.logger.info('No free slots (' + str(usati) + '/' + str(disponibili) + ')')
                 return False
 
+            self.miniSleep()
             for ship, num in fleet.iteritems():
                 li = soup.find('li', {"data-technology": self.SHIPS[ship]})
                 num = int(num)
@@ -552,15 +560,23 @@ class Bot(object):
                 except :
                     available = 0
 
-                input = self.driver.find_element_by_name(self.SHIPS_INPUT_NAME[ship])
                 if available < num and mission in ('attack', 'expedition'):
                     self.logger.info('No available ships to send')
                     return False
+
+                to_send = "0"
                 if num > 0:
-                    input.send_keys(str(num))
+                    to_send = str(num)
                 else:
                     if available > 0:
-                        input.send_keys(str(available))
+                        to_send = str(available)
+
+
+                if(int(to_send) > 0):
+                   try:
+                      WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.NAME, self.SHIPS_INPUT_NAME[ship]))).send_keys(to_send)
+                   except:
+                       return False
 
             self.miniSleep()
 
@@ -612,13 +628,14 @@ class Bot(object):
             self.miniSleep()
 
             if 'metal' in resources:
-                self.driver.find_element_by_name("metal").send_keys(str(resources['metal']))
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.NAME, "metal"))).send_keys(str(resources['metal']))
             if 'crystal' in resources:
-                self.driver.find_element_by_name("crystal").send_keys(str(resources['crystal']))
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.NAME, "crystal"))).send_keys(str(resources['crystal']))
             if 'deuterium' in resources:
-                self.driver.find_element_by_name("deuterium").send_keys(str(resources['deuterium']))
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.NAME, "deuterium"))).send_keys(str(resources['deuterium']))
 
             self.miniSleep()
+            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.ID, "sendFleet")))
             element = self.driver.find_element_by_id("sendFleet")
             self.driver.execute_script("arguments[0].click();", element)
             self.miniSleep()
@@ -850,7 +867,7 @@ class Bot(object):
                         navi = (p.sended_probe + ships_number) * 3 / 4
                         navi = self.arrotonda(navi)
                     else:
-                        navi = (risorse * 3 / 4) / ship_cargo
+                        navi = (risorse / 4) / ship_cargo
                         navi = self.arrotonda(navi)
 
                 if navi < ship_number_min:
