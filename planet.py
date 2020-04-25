@@ -90,7 +90,9 @@ class Planet(object):
             'dt': 0,
             'cs': 0,
             'rc': 0,
-            'ss': 0
+            'ss': 0,
+            'pf': 0,
+            'rp': 0
         }
         
     def __str__(self):

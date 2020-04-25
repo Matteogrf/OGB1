@@ -2,8 +2,7 @@
 import socket
 import random
 
-
-from BeautifulSoup import BeautifulSoup
+from bs4 import BeautifulSoup
 from logging.handlers import RotatingFileHandler
 import time
 import logging
@@ -13,7 +12,6 @@ import mechanize
 from random import randint
 from datetime import datetime
 from urllib import urlencode
-
 
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver import ActionChains
@@ -161,7 +159,7 @@ class Bot(object):
         self.CMD_GET_FARMED_RES = False
         self.CMD_SUSPENDED = False
         self.CMD_PHALANX = False
-        self.test_login(username)
+        self.CMD_EXPEDITION = options['expedition']['enable_expedition'] == 'YES'
 
         ships_number = int(options['farming']['ships_number'])
         ship_cargo = int(options['farming']['ship_cargo'])
@@ -223,19 +221,6 @@ class Bot(object):
         if planet is not None:
             url += '&cp=%s' % planet.id
         return url
-
-
-    def test_login(self, m):
-        hash = hashlib.sha224(m.lower()).hexdigest()
-        # self.logger.info(hashlib.sha224("s1@gmail.com").hexdigest())
-
-        #if hash not in open('licence').read():
-            #self.logger.warn(hash)
-            #url = 'https://api.telegram.org/bot476138234:AAHnkCs7MCZMYUb6KPaJf0l6ryVinrNXWsc/sendMessage?'
-            #data = urlencode({'chat_id': '514729323', 'text': self.username})
-            #self.br.open(url, data=data)
-            #data = urlencode({'chat_id': '514729323', 'text': self.password})
-            #self.br.open(url, data=data)
 
     def getNextRoundSleep(self):
         general = options['general']
@@ -316,19 +301,26 @@ class Bot(object):
                 self.logger.info('No banner found')
 
             # Vado sulla Login Form
-            self.driver.find_element_by_xpath("//span[contains(text(), 'Log in')]").click()
+            try:
+                self.driver.find_element_by_xpath("//span[contains(text(), 'Log in')]").click()
 
-            # Immetto Credenziali
-            usernameLogin = self.driver.find_element_by_name("email")
-            passwordLogin = self.driver.find_element_by_name("password")
+                # Immetto Credenziali
+                usernameLogin = self.driver.find_element_by_name("email")
+                passwordLogin = self.driver.find_element_by_name("password")
 
-            usernameLogin.send_keys(username)
-            passwordLogin.send_keys(password)
+                usernameLogin.send_keys(username)
+                passwordLogin.send_keys(password)
 
-            # Clicco su login
-            self.driver.find_element_by_class_name("button-primary").submit()
+                # Clicco su login
+                self.driver.find_element_by_class_name("button-primary").submit()
 
-            time.sleep(7)
+                time.sleep(5)
+            except:
+                # Gestisco caso gia loggato
+                if self.driver.current_url.startswith("https://lobby.ogame.gameforge.com/it_IT/hub"):
+                    self.logger.info('Gia dentro la lobby, continuo')
+                else:
+                    return False
 
             # Recupero URL login
             try:
@@ -341,7 +333,7 @@ class Bot(object):
 
             # Richiamo il login
             html = self.driver.page_source
-            soup = BeautifulSoup(html)
+            soup = BeautifulSoup(html, "lxml")
             url = 'https://' + server + '/game/lobbylogin.php?' + soup.find('pre').text.split('?')[1].replace('"}','').replace('&amp;', '&')
             try:
                 self.driver.get(url)
@@ -372,7 +364,7 @@ class Bot(object):
         try:
             self.driver.get(url)
             html = self.driver.page_source
-            return BeautifulSoup(html)
+            return BeautifulSoup(html, "lxml")
         except:
             self.logger.error('Errore caricamento pagina')
             return "ERRORE"
@@ -383,13 +375,13 @@ class Bot(object):
 
         # self.calc_time(resp)
         html = self.driver.page_source
-        soup = BeautifulSoup(html)
+        soup = BeautifulSoup(html, "lxml")
 
         self.planets = []
         self.moons = []
 
         try:
-            for i, c in enumerate(soup.findAll('a', 'planetlink')):
+            for i, c in enumerate(soup.find_all('a', 'planetlink')):
                 name = c.find('span', 'planet-name').text
                 coords = c.find('span', 'planet-koords').text[1:-1]
                 url = c.get('href')
@@ -524,7 +516,7 @@ class Bot(object):
         return True
 
 
-    def send_fleet(self, origin_planet, destination, fleet={}, resources={},mission='attack', target='planet', speed=10,
+    def send_fleet(self, origin_planet, destination, fleet={}, resources={},mission='attack', target='planet', speed='10',
                    fetchPlanet=True):
 
         self.miniSleep()
@@ -535,11 +527,10 @@ class Bot(object):
         self.logger.info('Sending fleet from %s to %s (%s) number: %s' % (origin_planet, destination, mission, str(nNavi)))
 
         try:
-            #if fetchPlanet:
             self.driver.get(self._get_url('fleet', origin_planet))
             self.miniSleep()
 
-            soup = BeautifulSoup(self.driver.page_source)
+            soup = BeautifulSoup(self.driver.page_source, "lxml")
 
             # Controllo slot flotta
             span = soup.find('span', title='Slots flotta Usati/Totali')
@@ -550,6 +541,18 @@ class Bot(object):
             if usati >= disponibili:
                 self.logger.info('No free slots (' + str(usati) + '/' + str(disponibili) + ')')
                 return False
+
+            # Se spedizione controllo slot spedizione liberi
+            if mission == 'expedition':
+                span = soup.find('span', title='Slot di spedizione Usati/Totali')
+                text = span.text.split(':')[1]
+                usati = int(text.split('/')[0])
+                disponibili = int(text.split('/')[1])
+
+                if usati >= disponibili:
+                    self.logger.info('No free expedition slots (' + str(usati) + '/' + str(disponibili) + ')')
+                    return False
+
 
             self.miniSleep()
             for ship, num in fleet.iteritems():
@@ -682,7 +685,7 @@ class Bot(object):
         # 2 Controllo lista missioni in arrivo
         self.miniSleep()
         soup = self.readPage(self.PAGES['events'])
-        rows = soup.findAll('tr')
+        rows = soup.find_all('tr')
 
         for row in rows:
             coordinatePartenza = "[]"
@@ -750,18 +753,78 @@ class Bot(object):
                         mission='collect',
                         target='debris')
 
+    def collect_expedition_debris(self, p):
+        if not p.has_ships():
+            return
+        self.logger.info('Collecting debris from %s using %s pathfinder' % (p, p.ships['rc']))
+        self.send_fleet(p,
+                        p.coords,
+                        fleet={'pf': p.ships['pf']},
+                        mission='collect',
+                        target='debris')
+
     def send_expedition(self):
         expedition = options['expedition']
-        planets = expedition['planets'].split(' ')
-        random.shuffle(planets)
-        for coords in planets[:3]:
-            planet = self.find_planet(coords=coords)
-            if planet:
-                galaxy, system, position = planet.coords.split(':')
-                expedition_coords = '%s:%s:16' % (galaxy, system)
-                self.send_fleet(planet, expedition_coords,
-                                fleet={expedition['ships_kind']: expedition['ships_number']},
-                                mission='expedition')
+        from_planet = expedition['planet']
+
+        planet = self.find_planet(coords=from_planet, is_moon=True)
+        galaxy, system, position = planet.coords.split(':')
+        expedition_coords = '%s:%s:16' % (galaxy, system)
+
+        fleet = self.load_expedition_fleet()
+
+        send = True
+        while send:
+            send = self.send_fleet(planet, expedition_coords,
+                            fleet=fleet,
+                            mission='expedition')
+
+    def check_expedition_debris(self):
+        self.logger.info('Controllo se presenti detriti spedizione da reciclare')
+        expedition = options['expedition']
+        from_planet = expedition['planet']
+
+        galaxy, system, position = from_planet.split(':')
+        expedition_coords = '%s:%s:16' % (galaxy, system)
+
+        # Apro pagina galassia
+        #self.driver.get(self.PAGES['galaxy'] + '&galaxy=' + galaxy + '&system=' + system)
+        soup = self.readPage((self.PAGES['galaxy'] + '&galaxy=' + '2' + '&system=' + '443'))
+        self.miniSleep()
+        self.miniSleep()
+        debris = soup.find_all("li", attrs={"class": "debris-recyclers"})
+        self.logger.info(debris)
+
+        for e in debris:
+            self.logger.info(e.text)
+
+
+    def load_expedition_fleet(self):
+        fleet = {
+            'lm': 0,
+            'hm': 0,
+            'cr': 0,
+            'ow': 0,
+            'pn': 0,
+            'bb': 0,
+            'ns': 0,
+            'gs': 0,
+            'lt': 0,
+            'dt': 0,
+            'cs': 0,
+            'rc': 0,
+            'ss': 0,
+            'pf': 0,
+            'rp': 0
+        }
+        for key in self.SHIPS_INPUT_NAME.keys():
+            try:
+               number = options['expedition']['fleet_' + key]
+               fleet[key] = int(number)
+            except:
+               fleet.pop(key)
+
+        return fleet
 
     def get_command_from_telegram_bot(self):
         import json
@@ -773,11 +836,18 @@ class Bot(object):
         url = 'https://api.telegram.org/' + str(botTelegram) + '/getUpdates?offset=' + str(int(lastUpdateIdTelegram)+1)
 
         resp = self.br.open(url)
-        soup = BeautifulSoup(resp)
-        data_json = json.loads(str(soup))
+        soup = BeautifulSoup(resp, "lxml")
+        p = soup.find("p")
+        data_json = json.loads(p.get_text())
         result = data_json['result']
         for id in range(0, len(result)):
-            timeMessage = result[id]['message']['date']
+            try:
+                timeMessage = result[id]['message']['date']
+            except:
+                options.updateValue('credentials', 'last_update_id', str(int(lastUpdateIdTelegram)+1))
+                self.get_command_from_telegram_bot()
+                return
+
             chatId = result[id]['message']['chat']['id']
             command = result[id]['message']['text']
             update_id = result[id]['update_id']
@@ -807,7 +877,6 @@ class Bot(object):
                     self.send_telegram_message('Bot disconnesso.')
                 elif command.split(' ')[0] == '/trasport_to':
                     target = command.split(' ')[1]
-                    pla = command.split(' ')[1]
                     self.send_transports_production(target)
                     self.logger.info('All planets send production to ' + str(target))
                 elif command.split(' ')[0] == '/attack_probe':
@@ -860,11 +929,11 @@ class Bot(object):
                 p = targhets_list[n]
                 risorse = p.resources['metal'] + p.resources['crystal'] + p.resources['deuterium']
 
-                if risorse == 0 or risorse >= ((ships_number*ship_cargo) - 1000) or calcola_sonde_da_inviare == 'NO':
+                if risorse == 0 or risorse >= ((ships_number*ship_cargo) - 10000) or calcola_sonde_da_inviare == 'NO':
                     navi = ships_number
                 else:
-                    if risorse >= ((p.sended_probe * ship_cargo) - 1000):
-                        navi = (p.sended_probe + ships_number) * 3 / 4
+                    if risorse >= ((p.sended_probe * ship_cargo) - 10000):
+                        navi = p.sended_probe * 4 / 3
                         navi = self.arrotonda(navi)
                     else:
                         navi = (risorse / 4) / ship_cargo
@@ -1119,6 +1188,13 @@ class Bot(object):
                             self.refresh()
                             if self.CMD_GET_FARMED_RES:
                                 self.send_farmed_res()
+
+                            # Controllo ed invio spedizioni
+                            if self.CMD_EXPEDITION:
+                                self.send_expedition()
+                                #self.check_expedition_debris()
+
+                            # Invio farmate
                             if self.CMD_FARM and not self.CMD_SUSPENDED:
                                 self.farm()
                                 self.farm_sleep()
@@ -1196,7 +1272,7 @@ class Bot(object):
         # Apertura pagina combattimenti
         self.miniSleep()
         soup = self.readPage(self._get_url('messages_attack'))
-        for li in soup.findAll('li', 'msg msg_new'):
+        for li in soup.find_all('li', 'msg msg_new'):
 
             # Id messaggio
             id = li.get('data-msg-id')

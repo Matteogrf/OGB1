@@ -1,5 +1,5 @@
 mechanize
-BeautifulSoup
+beautifulsoup4
 watchdog
 lxml
 selenium
